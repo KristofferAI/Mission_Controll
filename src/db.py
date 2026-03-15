@@ -2,12 +2,11 @@ import sqlite3
 import os
 from datetime import datetime
 
-_HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(_HERE, "data", "mc.db")
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data', 'mc.db')
 
 
 def get_conn():
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    os.makedirs(os.path.dirname(os.path.abspath(DB_PATH)), exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
@@ -105,6 +104,27 @@ def init_db():
             outcome    TEXT,
             reasoning  TEXT,
             learned_at TEXT
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS recommendations (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            date                TEXT,
+            match               TEXT,
+            league              TEXT,
+            market              TEXT,
+            selection           TEXT,
+            odds                REAL,
+            true_probability    REAL,
+            implied_probability REAL,
+            edge_pct            REAL,
+            recommended_stake   REAL,
+            bet_type            TEXT DEFAULT 'single',
+            parlay_id           TEXT,
+            status              TEXT DEFAULT 'open',
+            actual_result       TEXT DEFAULT '',
+            pnl                 REAL DEFAULT 0.0,
+            created_at          TEXT
         )
     """)
     c.execute(
@@ -350,3 +370,95 @@ def list_learning_log(bot_id=None, limit: int = 50) -> list:
         ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+# ── Recommendations ───────────────────────────────────────────────────────────
+def add_recommendation(date, match, league, market, selection, odds, true_probability,
+                       implied_probability, edge_pct, recommended_stake,
+                       bet_type='single', parlay_id=None) -> int:
+    """Insert a recommendation and return its id."""
+    conn = get_conn()
+    cur = conn.execute(
+        """INSERT INTO recommendations
+           (date, match, league, market, selection, odds, true_probability,
+            implied_probability, edge_pct, recommended_stake, bet_type, parlay_id,
+            status, actual_result, pnl, created_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'open','',0.0,?)""",
+        (date, match, league, market, selection, odds, true_probability,
+         implied_probability, edge_pct, recommended_stake, bet_type, parlay_id,
+         datetime.utcnow().isoformat()),
+    )
+    rec_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return rec_id
+
+
+def list_recommendations(status=None, date_from=None, date_to=None) -> list:
+    """List recommendations with optional filters."""
+    conn = get_conn()
+    query = "SELECT * FROM recommendations WHERE 1=1"
+    params = []
+    if status:
+        query += " AND status=?"
+        params.append(status)
+    if date_from:
+        query += " AND date>=?"
+        params.append(date_from)
+    if date_to:
+        query += " AND date<=?"
+        params.append(date_to)
+    query += " ORDER BY created_at DESC"
+    rows = conn.execute(query, params).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def settle_recommendation(rec_id: int, actual_result: str, won: bool):
+    """Set status to won/lost and calculate pnl."""
+    conn = get_conn()
+    row = conn.execute("SELECT * FROM recommendations WHERE id=?", (rec_id,)).fetchone()
+    if not row:
+        conn.close()
+        return
+    rec = dict(row)
+    pnl = (rec['recommended_stake'] * (rec['odds'] - 1)) if won else -rec['recommended_stake']
+    status = 'won' if won else 'lost'
+    conn.execute(
+        "UPDATE recommendations SET status=?, actual_result=?, pnl=? WHERE id=?",
+        (status, actual_result, pnl, rec_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_recommendation_summary() -> dict:
+    """Return {total_staked, total_pnl, win_count, total_count, win_rate, roi_pct}"""
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT recommended_stake, pnl, status FROM recommendations WHERE status IN ('won','lost')"
+    ).fetchall()
+    conn.close()
+    if not rows:
+        return {
+            'total_staked': 0.0,
+            'total_pnl': 0.0,
+            'win_count': 0,
+            'total_count': 0,
+            'win_rate': 0.0,
+            'roi_pct': 0.0,
+        }
+    total_staked = sum(r['recommended_stake'] for r in rows)
+    total_pnl = sum(r['pnl'] for r in rows)
+    win_count = sum(1 for r in rows if r['status'] == 'won')
+    total_count = len(rows)
+    win_rate = (win_count / total_count * 100) if total_count > 0 else 0.0
+    roi_pct = (total_pnl / total_staked * 100) if total_staked > 0 else 0.0
+    return {
+        'total_staked': total_staked,
+        'total_pnl': total_pnl,
+        'win_count': win_count,
+        'total_count': total_count,
+        'win_rate': win_rate,
+        'roi_pct': roi_pct,
+    }
