@@ -64,23 +64,38 @@ MAX_COMBINED_ODDS = 15.0
 # ── API helpers ───────────────────────────────────────────────────────────────
 
 def fetch_odds(sport: str) -> list:
-    """Fetch odds from The Odds API for a given sport."""
-    url = (
-        f"{BASE_URL}/sports/{sport}/odds/"
-        f"?apiKey={ODDS_API_KEY}"
-        f"&regions=eu"
-        f"&markets=h2h,totals,btts"
-        f"&oddsFormat=decimal"
-    )
-    try:
-        resp = requests.get(url, timeout=15)
-        resp.raise_for_status()
-        data = resp.json()
-        logger.info(f"Fetched {len(data)} events for {sport}")
-        return data
-    except Exception as e:
-        logger.warning(f"Failed to fetch odds for {sport}: {e}")
-        return []
+    """Fetch odds from The Odds API for a given sport.
+    Tries full market list first, falls back to h2h+totals, then h2h only.
+    """
+    market_tries = [
+        'h2h,totals,btts',
+        'h2h,totals',
+        'h2h',
+    ]
+    for markets in market_tries:
+        url = (
+            f"{BASE_URL}/sports/{sport}/odds/"
+            f"?apiKey={ODDS_API_KEY}"
+            f"&regions=eu"
+            f"&markets={markets}"
+            f"&oddsFormat=decimal"
+        )
+        try:
+            resp = requests.get(url, timeout=15)
+            if resp.status_code == 422:
+                logger.debug(f"422 for {sport} markets={markets}, trying fewer markets")
+                continue
+            resp.raise_for_status()
+            data = resp.json()
+            logger.info(f"Fetched {len(data)} events for {sport} (markets={markets})")
+            return data
+        except requests.exceptions.HTTPError:
+            continue
+        except Exception as e:
+            logger.warning(f"Failed to fetch odds for {sport}: {e}")
+            return []
+    logger.warning(f"Could not fetch any odds for {sport}")
+    return []
 
 
 def parse_bookmaker_odds(event: dict) -> dict:
