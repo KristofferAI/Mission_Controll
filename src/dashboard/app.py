@@ -47,20 +47,16 @@ st.markdown(
 
 # ── Sidebar navigation ────────────────────────────────────────────────────────
 PAGES = {
-    "🎯  Overview":  "overview",
-    "🤖  Bots":      "bots",
     "💰  Bets":      "bets",
-    "⚙️  Jobs":      "jobs",
-    "⚽  OddsBot":   "oddsbot",
+    "🎯  Overview":  "overview",
     "🔧  Settings":  "settings",
 }
 
 st.sidebar.image(
-    "https://img.shields.io/badge/Mission_Controll-v0.1-1E90FF?style=for-the-badge",
-    use_container_width=True,
+    "https://img.shields.io/badge/Mission_Controll-v0.2-1E90FF?style=for-the-badge",
 )
 st.sidebar.title("Mission Controll")
-st.sidebar.caption("Paper Betting Office · MVP")
+st.sidebar.caption("Betting Tracker · EV Edition")
 st.sidebar.markdown("---")
 
 choice = st.sidebar.radio("Navigate", list(PAGES.keys()), label_visibility="collapsed")
@@ -70,16 +66,10 @@ st.sidebar.markdown("---")
 st.sidebar.caption("Built with Streamlit + SQLite")
 
 # ── Route to page ─────────────────────────────────────────────────────────────
-if page_key == "overview":
-    from src.dashboard.pages.overview import render
-elif page_key == "bots":
-    from src.dashboard.pages.bots import render
-elif page_key == "bets":
+if page_key == "bets":
     from src.dashboard.pages.bets import render
-elif page_key == "jobs":
-    from src.dashboard.pages.jobs import render
-elif page_key == "oddsbot":
-    from src.dashboard.pages.oddsbot import render
+elif page_key == "overview":
+    from src.dashboard.pages.overview import render
 elif page_key == "settings":
     from src.dashboard.pages.settings import render
 
