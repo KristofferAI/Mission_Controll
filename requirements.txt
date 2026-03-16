@@ -7,3 +7,5 @@ schedule>=1.2.0
 apscheduler>=3.10.0
 python-telegram-bot>=20.0
 plotly>=5.18.0
+plotly==6.6.0
+python-telegram-bot==22.7

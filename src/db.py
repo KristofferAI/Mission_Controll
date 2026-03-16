@@ -745,7 +745,7 @@ def get_recent_results(limit: int = 5) -> list:
     """Hent siste X resultater."""
     conn = get_conn()
     rows = conn.execute(
-        """SELECT match, selection, status, pnl, actual_result, date 
+        """SELECT match, selection, status, pnl, actual_result, date, odds 
            FROM recommendations 
            WHERE status IN ('won', 'lost') 
            ORDER BY created_at DESC 
