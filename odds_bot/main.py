@@ -1,24 +1,16 @@
 #!/usr/bin/env python3
 """
-OddsBot — Daily betting recommendation engine.
-Uses The Odds API to find value bets via margin removal.
-
-Usage:
-  python3 odds_bot/main.py --run      # Fetch + analyze + save recommendations
-  python3 odds_bot/main.py --settle   # Settle completed bets via scores API
+Odds Bot - Auto-betting motor med Kelly-kalkulator, smart parlay-bygging,
+automatisk resultat-sjekking og Telegram-varsler.
 """
-
 import os
 import sys
-import json
 import argparse
-import math
 import itertools
 import logging
-import random
-from datetime import datetime, timezone
-from typing import Optional
-
+import json
+from datetime import datetime, timezone, timedelta
+from typing import List, Dict, Optional, Tuple
 import requests
 from dotenv import load_dotenv
 
@@ -28,21 +20,49 @@ if _ROOT not in sys.path:
 
 load_dotenv(os.path.join(_ROOT, '.env'))
 
-logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+# ── Logging konfigurasjon ───────────────────────────────────────────────────
+log_dir = os.path.join(_ROOT, 'data')
+os.makedirs(log_dir, exist_ok=True)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(os.path.join(log_dir, 'odds_bot.log')),
+        logging.StreamHandler()
+    ]
+)
 logger = logging.getLogger(__name__)
 
+# ── Konfigurasjon ────────────────────────────────────────────────────────────
 ODDS_API_KEY = os.getenv('ODDS_API_KEY', '')
 BASE_URL = 'https://api.the-odds-api.com/v4'
 
-SPORTS = [
-    'soccer_epl',
-    'soccer_uefa_champs_league',
-    'soccer_uefa_europa_league',
-    'soccer_spain_la_liga',
-    'soccer_germany_bundesliga',
-    'soccer_italy_serie_a',
-]
+# Auto-betting config
+AUTO_PLACE_BETS = os.getenv('AUTO_PLACE_BETS', 'true').lower() == 'true'
+PAPER_MODE = os.getenv('PAPER_MODE', 'true').lower() == 'true'
+DAILY_BET_LIMIT = int(os.getenv('DAILY_BET_LIMIT', '10'))
+MIN_EDGE_FOR_AUTO = float(os.getenv('MIN_EDGE_FOR_AUTO', '3.0'))
 
+# Kelly config
+KELLY_FRACTION = float(os.getenv('KELLY_FRACTION', '0.25'))  # Quarter-Kelly
+MIN_STAKE = 50.0
+MAX_STAKE = 200.0
+DEFAULT_BANKROLL = 1000.0
+
+# Parlay config
+PARLAY_STAKE = 50.0
+SINGLE_STAKE = 30.0
+MIN_PARLAY_ODDS = 10.0
+MAX_PARLAY_ODDS = 60.0
+MIN_LEGS = 2  # Nå støtter vi 2-leg parlays også
+MAX_LEGS = 5
+TOP_PARLAYS = 5
+
+SPORTS = [
+    'soccer_epl', 'soccer_uefa_champs_league', 'soccer_uefa_europa_league',
+    'soccer_spain_la_liga', 'soccer_germany_bundesliga', 'soccer_italy_serie_a',
+    'soccer_france_ligue_one', 'soccer_netherlands_eredivisie',
+]
 SPORT_LABELS = {
     'soccer_epl': 'Premier League',
     'soccer_uefa_champs_league': 'Champions League',
@@ -50,503 +70,692 @@ SPORT_LABELS = {
     'soccer_spain_la_liga': 'La Liga',
     'soccer_germany_bundesliga': 'Bundesliga',
     'soccer_italy_serie_a': 'Serie A',
+    'soccer_france_ligue_one': 'Ligue 1',
+    'soccer_netherlands_eredivisie': 'Eredivisie',
 }
 
-MIN_EDGE_PCT = 2.0
-MIN_STAKE = 50.0
-MAX_STAKE = 200.0
-BANKROLL = 10000.0
-MAX_PARLAY_LEGS = 4
-MIN_PARLAY_LEGS = 2
-MAX_COMBINED_ODDS = 15.0
+# Telegram config
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '')
+TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID', '')
 
 
-# ── API helpers ───────────────────────────────────────────────────────────────
+# ── Kelly Kalkulator ────────────────────────────────────────────────────────
+def get_bankroll() -> float:
+    """Hent nåværende bankroll fra databasen."""
+    try:
+        from src.db import get_balance
+        return get_balance()
+    except Exception as e:
+        logger.warning(f"Kunne ikke hente bankroll: {e}, bruker default {DEFAULT_BANKROLL}")
+        return DEFAULT_BANKROLL
 
-def fetch_odds(sport: str) -> list:
-    """Fetch odds from The Odds API for a given sport.
-    Tries full market list first, falls back to h2h+totals, then h2h only.
+
+def kelly_criterion(true_prob: float, odds: float, fraction: float = KELLY_FRACTION) -> float:
     """
-    market_tries = [
-        'h2h,totals,btts',
-        'h2h,totals',
-        'h2h',
-    ]
-    for markets in market_tries:
-        url = (
-            f"{BASE_URL}/sports/{sport}/odds/"
-            f"?apiKey={ODDS_API_KEY}"
-            f"&regions=eu"
-            f"&markets={markets}"
-            f"&oddsFormat=decimal"
+    Quarter-Kelly for konservativ sizing.
+    Returnerer stake mellom MIN_STAKE og MAX_STAKE basert på bankroll.
+    
+    Args:
+        true_prob: Beregnet sann sannsynlighet (0-1)
+        odds: Odds fra bookmaker
+        fraction: Kelly-fraksjon (default 0.25 = Quarter-Kelly)
+    
+    Returns:
+        Stake i NOK
+    """
+    bankroll = get_bankroll()
+    edge = (true_prob * odds) - 1
+    
+    if edge <= 0:
+        logger.debug(f"Ingen positiv edge (edge={edge:.3f}), returnerer 0 stake")
+        return 0
+    
+    kelly_pct = edge / (odds - 1)
+    stake = bankroll * kelly_pct * fraction
+    
+    # Clamp til min/max
+    final_stake = max(MIN_STAKE, min(MAX_STAKE, stake))
+    logger.debug(f"Kelly: bankroll={bankroll:.0f}, edge={edge:.3f}, kelly_pct={kelly_pct:.3f}, stake={final_stake:.0f}")
+    return final_stake
+
+
+def get_daily_bet_count() -> int:
+    """Hent antall bets plassert i dag."""
+    try:
+        from src.db import get_conn
+        today = datetime.now().strftime('%Y-%m-%d')
+        conn = get_conn()
+        row = conn.execute(
+            "SELECT COUNT(*) as count FROM recommendations WHERE date=? AND status IN ('open', 'won', 'lost')",
+            (today,)
+        ).fetchone()
+        conn.close()
+        return row['count'] if row else 0
+    except Exception as e:
+        logger.warning(f"Kunne ikke telle dagens bets: {e}")
+        return 0
+
+
+def can_place_bet() -> bool:
+    """Sjekk om vi kan plassere flere bets i dag."""
+    count = get_daily_bet_count()
+    if count >= DAILY_BET_LIMIT:
+        logger.info(f"Daglig limit nådd: {count}/{DAILY_BET_LIMIT} bets")
+        return False
+    return True
+
+
+# ── Telegram Notifikasjoner ─────────────────────────────────────────────────
+def send_telegram_message(message: str) -> bool:
+    """Send melding til Telegram hvis konfigurert."""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        logger.debug("Telegram ikke konfigurert, hopper over varsling")
+        return False
+    
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        payload = {
+            'chat_id': TELEGRAM_CHAT_ID,
+            'text': message,
+            'parse_mode': 'Markdown'
+        }
+        resp = requests.post(url, json=payload, timeout=10)
+        resp.raise_for_status()
+        logger.info("Telegram varsel sendt")
+        return True
+    except Exception as e:
+        logger.warning(f"Kunne ikke sende Telegram varsel: {e}")
+        return False
+
+
+def notify_bet_placed(bet: Dict, stake: float, is_auto: bool = False):
+    """Send varsel om nytt bet."""
+    mode = "🤖 AUTO-PLACED" if is_auto else "👤 MANUELL"
+    paper = "📄 PAPER MODE" if PAPER_MODE else "💰 REAL MONEY"
+    message = (
+        f"🎯 *Nytt bet plassert*\n\n"
+        f"🏆 {bet['league']}\n"
+        f"⚽ {bet['match']}\n"
+        f"🎯 {bet['selection']} @ {bet['odds']:.2f}\n"
+        f"📊 Edge: {bet['edge_pct']:.1f}%\n"
+        f"💰 Stake: {stake:.0f} NOK\n\n"
+        f"{mode} | {paper}"
+    )
+    send_telegram_message(message)
+    logger.info(f"Bet plassert: {bet['match']} - {bet['selection']} @ {bet['odds']:.2f}")
+
+
+def notify_settlement(match: str, selection: str, won: bool, pnl: float, actual: str):
+    """Send varsel om bet resultat."""
+    emoji = "✅ VUNNET" if won else "❌ TAPT"
+    sign = "+" if pnl > 0 else ""
+    message = (
+        f"{emoji} *Bet resultat*\n\n"
+        f"⚽ {match}\n"
+        f"🎯 {selection}\n"
+        f"🏁 Resultat: {actual}\n"
+        f"💰 PnL: {sign}{pnl:.0f} NOK"
+    )
+    send_telegram_message(message)
+    logger.info(f"Bet {match} - {selection}: {'WON' if won else 'LOST'} ({pnl:+.0f} NOK)")
+
+
+def notify_daily_summary():
+    """Send daglig sammendrag."""
+    try:
+        from src.db import get_recommendation_summary, get_balance
+        summary = get_recommendation_summary()
+        balance = get_balance()
+        
+        today = datetime.now().strftime('%Y-%m-%d')
+        message = (
+            f"📊 *Daglig sammendrag - {today}*\n\n"
+            f"💰 Bankroll: {balance:.0f} NOK\n"
+            f"📈 Total PnL: {summary['total_pnl']:+.0f} NOK\n"
+            f"🎯 Win Rate: {summary['win_rate']:.1f}% ({summary['win_count']}/{summary['total_count']})\n"
+            f"📊 ROI: {summary['roi_pct']:+.1f}%\n\n"
+            f"_God dag for betting!_ 🚀"
         )
-        try:
-            resp = requests.get(url, timeout=15)
-            if resp.status_code == 422:
-                logger.debug(f"422 for {sport} markets={markets}, trying fewer markets")
-                continue
-            resp.raise_for_status()
-            data = resp.json()
-            logger.info(f"Fetched {len(data)} events for {sport} (markets={markets})")
-            return data
-        except requests.exceptions.HTTPError:
-            continue
-        except Exception as e:
-            logger.warning(f"Failed to fetch odds for {sport}: {e}")
-            return []
-    logger.warning(f"Could not fetch any odds for {sport}")
-    return []
+        send_telegram_message(message)
+        logger.info("Daglig sammendrag sendt")
+    except Exception as e:
+        logger.error(f"Kunne ikke sende daglig sammendrag: {e}")
 
 
-def parse_bookmaker_odds(event: dict) -> dict:
-    """
-    Parse bookmaker data from an event into a clean structure with
-    per-outcome lists of all bookmaker odds.
-    """
-    markets: dict = {}
-
-    for bookmaker in event.get('bookmakers', []):
-        for market in bookmaker.get('markets', []):
-            key = market['key']  # h2h, totals, btts
-            if key not in markets:
-                markets[key] = {}
-            for outcome in market.get('outcomes', []):
-                name = outcome['name']
-                price = float(outcome['price'])
-                markets[key].setdefault(name, []).append(price)
-
-    return {
-        'fixture_id': event['id'],
-        'home_team': event['home_team'],
-        'away_team': event['away_team'],
-        'commence_time': event['commence_time'],
-        'markets': markets,
-    }
+# ── Odds API ────────────────────────────────────────────────────────────────
+def fetch_odds(sport: str) -> List[Dict]:
+    """Hent odds for en sport fra The Odds API."""
+    try:
+        resp = requests.get(
+            f"{BASE_URL}/sports/{sport}/odds/",
+            params={'apiKey': ODDS_API_KEY, 'regions': 'eu',
+                    'markets': 'h2h,totals', 'oddsFormat': 'decimal'},
+            timeout=15
+        )
+        resp.raise_for_status()
+        now = datetime.now(timezone.utc)
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        future = [e for e in resp.json()
+                  if datetime.fromisoformat(e['commence_time'].replace('Z', '+00:00')) >= today_start]
+        logger.info(f"{SPORT_LABELS.get(sport, sport)}: {len(future)} kamper")
+        return future
+    except Exception as e:
+        logger.warning(f"Feil ved henting av {sport}: {e}")
+        return []
 
 
-def remove_margin(outcome_odds: dict) -> dict:
-    """
-    Given outcome → list[odds], return outcome → true_probability
-    using average margin removal across bookmakers.
-    """
+def remove_margin(outcome_odds: Dict[str, List[float]]) -> Dict[str, float]:
+    """Fjern bookmaker-margin for å finne sann sannsynlighet."""
     outcomes = list(outcome_odds.keys())
-    n_bookmakers = max(len(v) for v in outcome_odds.values()) if outcome_odds else 0
-    if n_bookmakers == 0:
-        return {}
-
-    # We'll accumulate true_probs per outcome across bookmakers
-    true_prob_sums = {o: 0.0 for o in outcomes}
-    valid_counts = {o: 0 for o in outcomes}
-
-    # For each "bookmaker index", compute overround and distribute
-    for i in range(n_bookmakers):
-        bk_odds = {}
-        for outcome in outcomes:
-            odds_list = outcome_odds[outcome]
-            if i < len(odds_list):
-                bk_odds[outcome] = odds_list[i]
-
-        if len(bk_odds) < len(outcomes):
-            continue  # skip incomplete bookmakers
-
-        overround = sum(1.0 / o for o in bk_odds.values())
-        if overround <= 0:
+    sums = {o: 0.0 for o in outcomes}
+    counts = {o: 0 for o in outcomes}
+    n = max(len(v) for v in outcome_odds.values())
+    
+    for i in range(n):
+        bk = {o: outcome_odds[o][i] for o in outcomes if i < len(outcome_odds[o])}
+        if len(bk) < len(outcomes):
             continue
-
-        for outcome, odd in bk_odds.items():
-            raw_prob = (1.0 / odd) / overround
-            true_prob_sums[outcome] += raw_prob
-            valid_counts[outcome] += 1
-
-    result = {}
-    for outcome in outcomes:
-        if valid_counts[outcome] > 0:
-            result[outcome] = true_prob_sums[outcome] / valid_counts[outcome]
-        else:
-            # fallback: simple average of implied probs
-            odds_list = outcome_odds[outcome]
-            result[outcome] = sum(1.0 / o for o in odds_list) / len(odds_list) if odds_list else 0.0
-
-    return result
+        overround = sum(1.0 / p for p in bk.values())
+        for o, p in bk.items():
+            sums[o] += (1.0 / p) / overround
+            counts[o] += 1
+    
+    return {o: sums[o] / counts[o] for o in outcomes if counts[o] > 0}
 
 
-def find_value_bets(parsed: dict) -> list:
+# ── Bet Analyse ─────────────────────────────────────────────────────────────
+def get_best_bets_per_fixture(event: Dict, league: str) -> Optional[Dict]:
     """
-    Analyse each market in the parsed event and return a list of value bet dicts.
+    For hver kamp, returner det beste bet-kandidaten.
+    Velger enten h2h eller totals basert på EV.
     """
-    results = []
-    home = parsed['home_team']
-    away = parsed['away_team']
-    fixture_id = parsed['fixture_id']
+    home = event['home_team']
+    away = event['away_team']
+    fixture_id = event['id']
+    commence = event['commence_time']
 
-    for market_key, outcome_odds in parsed['markets'].items():
-        if not outcome_odds:
-            continue
+    markets = {}
+    for bk in event.get('bookmakers', []):
+        for m in bk.get('markets', []):
+            if m['key'] == 'h2h_lay':
+                continue
+            for o in m.get('outcomes', []):
+                markets.setdefault(m['key'], {}).setdefault(
+                    o['name'], []).append(float(o['price']))
 
+    best_bet = None
+    best_ev = -999
+
+    for market_key, outcome_odds in markets.items():
         true_probs = remove_margin(outcome_odds)
-
         for outcome, true_prob in true_probs.items():
             odds_list = outcome_odds.get(outcome, [])
             if not odds_list:
                 continue
-
             best_odds = max(odds_list)
+
+            # Filtrer urealistiske odds
+            if best_odds > 8.0 and market_key == 'totals':
+                continue
+            if best_odds < 1.3:
+                continue
+
             implied_prob = 1.0 / best_odds
             edge_pct = (true_prob - implied_prob) * 100
+            ev = true_prob * best_odds - 1
 
-            if edge_pct >= MIN_EDGE_PCT:
-                # Quarter Kelly
-                if best_odds <= 1.0:
-                    continue
-                kelly_fraction = (true_prob * best_odds - 1.0) / (best_odds - 1.0) * 0.25
-                kelly_fraction = max(0.0, kelly_fraction)
-                stake = min(MAX_STAKE, max(MIN_STAKE, kelly_fraction * BANKROLL))
-
-                results.append({
+            if ev > best_ev:
+                best_ev = ev
+                best_bet = {
                     'fixture_id': fixture_id,
                     'match': f"{home} vs {away}",
-                    'league': '',  # filled in run_pipeline
+                    'league': league,
                     'market': market_key,
                     'selection': outcome,
                     'odds': best_odds,
                     'true_probability': true_prob,
                     'implied_probability': implied_prob,
                     'edge_pct': edge_pct,
-                    'recommended_stake': stake,
-                })
+                    'commence_time': commence,
+                }
 
-    return results
+    return best_bet
 
 
-def build_parlays(value_bets: list) -> list:
+def format_selection(market: str, selection: str) -> str:
+    """Formater bet-valg for visning."""
+    if market == 'totals':
+        return selection  # "Over 2.5" eller "Under 2.5"
+    return selection  # Lagnavn for h2h
+
+
+# ── Smart Parlay-bygging ────────────────────────────────────────────────────
+def build_parlays(all_bets: List[Dict]) -> List[Dict]:
     """
-    Build 2–4 leg parlays from value_bets, only combining different fixtures.
-    Returns a flat list of leg dicts with bet_type='parlay' and parlay_id set.
+    Bygg parlays som minimerer korrelasjon:
+    - Maks 1 bet per liga i samme parlay
+    - 2-5 legs (inkludert 2-leg nå)
+    - Kombinerte odds mellom MIN og MAX
+    - Sortert etter kombinert EV
     """
-    if len(value_bets) < MIN_PARLAY_LEGS:
+    if len(all_bets) < MIN_LEGS:
         return []
 
-    parlay_candidates = []
     today_str = datetime.now().strftime('%Y%m%d')
+    candidates = []
 
-    for n_legs in range(MIN_PARLAY_LEGS, MAX_PARLAY_LEGS + 1):
-        for combo in itertools.combinations(value_bets, n_legs):
-            # Ensure all from different fixtures
+    for n in range(MIN_LEGS, min(MAX_LEGS + 1, len(all_bets) + 1)):
+        for combo in itertools.combinations(all_bets, n):
+            # Sjekk at alle er fra forskjellige kamper
             fixture_ids = [b['fixture_id'] for b in combo]
-            if len(set(fixture_ids)) < n_legs:
+            if len(set(fixture_ids)) < n:
+                continue
+            
+            # Sjekk at maks 1 bet per liga
+            leagues = [b['league'] for b in combo]
+            if len(leagues) != len(set(leagues)):
                 continue
 
             combined_odds = 1.0
             for b in combo:
                 combined_odds *= b['odds']
 
-            if combined_odds > MAX_COMBINED_ODDS:
+            if not (MIN_PARLAY_ODDS <= combined_odds <= MAX_PARLAY_ODDS):
                 continue
 
-            combined_edge = sum(b['edge_pct'] for b in combo)
-            if combined_edge < MIN_EDGE_PCT * n_legs:
-                continue
+            combined_ev = sum(b['edge_pct'] for b in combo)
+            combined_true_prob = 1.0
+            for b in combo:
+                combined_true_prob *= b['true_probability']
 
-            parlay_candidates.append({
-                'legs': combo,
+            candidates.append({
+                'legs': list(combo),
                 'combined_odds': combined_odds,
-                'combined_edge': combined_edge,
-                'n_legs': n_legs,
+                'combined_ev': combined_ev,
+                'combined_true_prob': combined_true_prob,
+                'n_legs': n,
             })
 
-    # Sort by combined_edge desc, take top 5
-    parlay_candidates.sort(key=lambda x: x['combined_edge'], reverse=True)
-    top_parlays = parlay_candidates[:5]
+    # Sorter etter kombinert EV
+    candidates.sort(key=lambda x: x['combined_ev'], reverse=True)
 
-    result_legs = []
-    for i, parlay in enumerate(top_parlays):
-        parlay_id = f"parlay_{today_str}_{i}"
+    # Prioriter Premier League parlays først
+    epl_candidates = [c for c in candidates if any(b['league'] == 'Premier League' for b in c['legs'])]
+    other_candidates = [c for c in candidates if not any(b['league'] == 'Premier League' for b in c['legs'])]
 
-        # Quarter Kelly on parlay combined odds
-        combined_odds = parlay['combined_odds']
-        # Treat combined_edge / 100 as rough true_prob for parlay
-        avg_true_prob = 1.0 / combined_odds * (1 + parlay['combined_edge'] / 100)
-        avg_true_prob = min(0.99, avg_true_prob)
+    result = []
+    used_parlays = set()
 
-        if combined_odds > 1.0:
-            kelly = (avg_true_prob * combined_odds - 1.0) / (combined_odds - 1.0) * 0.25
-            kelly = max(0.0, kelly)
-            stake = min(MAX_STAKE, max(MIN_STAKE, kelly * BANKROLL))
-        else:
-            stake = MIN_STAKE
-
-        for leg in parlay['legs']:
-            result_legs.append({
-                **leg,
-                'bet_type': 'parlay',
-                'parlay_id': parlay_id,
-                'recommended_stake': stake,
-            })
-
-    return result_legs
-
-
-# ── Mock data ─────────────────────────────────────────────────────────────────
-
-def generate_mock_data() -> list:
-    """Generate realistic mock events when no API key is present."""
-    mock_teams = [
-        ('Arsenal', 'Chelsea'),
-        ('Manchester City', 'Liverpool'),
-        ('Real Madrid', 'Barcelona'),
-        ('Bayern Munich', 'Borussia Dortmund'),
-        ('Juventus', 'AC Milan'),
-        ('PSG', 'Lyon'),
-    ]
-    events = []
-    for home, away in mock_teams:
-        # Slightly skewed probabilities to create value opportunities
-        true_h = random.uniform(0.35, 0.55)
-        true_d = random.uniform(0.20, 0.30)
-        true_a = 1.0 - true_h - true_d
-
-        bookmakers = []
-        for bk_name in ['bet365', 'unibet', 'betway']:
-            margin = random.uniform(1.04, 1.10)
-            h_odds = round((1.0 / true_h) * random.uniform(0.92, 1.02), 2)
-            d_odds = round((1.0 / true_d) * random.uniform(0.92, 1.02), 2)
-            a_odds = round((1.0 / true_a) * random.uniform(0.92, 1.02), 2)
-            bookmakers.append({
-                'key': bk_name,
-                'markets': [
-                    {
-                        'key': 'h2h',
-                        'outcomes': [
-                            {'name': home, 'price': h_odds},
-                            {'name': 'Draw', 'price': d_odds},
-                            {'name': away, 'price': a_odds},
-                        ]
-                    },
-                    {
-                        'key': 'totals',
-                        'outcomes': [
-                            {'name': 'Over 2.5', 'price': round(random.uniform(1.6, 2.2), 2)},
-                            {'name': 'Under 2.5', 'price': round(random.uniform(1.6, 2.2), 2)},
-                        ]
-                    },
-                    {
-                        'key': 'btts',
-                        'outcomes': [
-                            {'name': 'Yes', 'price': round(random.uniform(1.5, 2.0), 2)},
-                            {'name': 'No', 'price': round(random.uniform(1.5, 2.0), 2)},
-                        ]
-                    },
-                ]
-            })
-
-        events.append({
-            'id': f"mock_{home.replace(' ', '')}_{away.replace(' ', '')}",
-            'home_team': home,
-            'away_team': away,
-            'commence_time': datetime.now(timezone.utc).isoformat(),
-            'bookmakers': bookmakers,
+    # Legg inn EPL-parlays først
+    for p in epl_candidates[:2]:
+        key = frozenset(b['fixture_id'] for b in p['legs'])
+        if key in used_parlays:
+            continue
+        used_parlays.add(key)
+        pid = f"parlay_{today_str}_epl_{len(result)}"
+        result.append({
+            'parlay_id': pid,
+            'legs': p['legs'],
+            'combined_odds': p['combined_odds'],
+            'combined_ev': p['combined_ev'],
+            'combined_true_prob': p['combined_true_prob'],
+            'stake': PARLAY_STAKE,
         })
-    return events
+
+    # Fyll opp med beste øvrige
+    for p in other_candidates:
+        if len(result) >= TOP_PARLAYS:
+            break
+        key = frozenset(b['fixture_id'] for b in p['legs'])
+        if key in used_parlays:
+            continue
+        used_parlays.add(key)
+        pid = f"parlay_{today_str}_{len(result)}"
+        result.append({
+            'parlay_id': pid,
+            'legs': p['legs'],
+            'combined_odds': p['combined_odds'],
+            'combined_ev': p['combined_ev'],
+            'combined_true_prob': p['combined_true_prob'],
+            'stake': PARLAY_STAKE,
+        })
+
+    logger.info(f"Bygget {len(result)} parlays fra {len(all_bets)} kandidater")
+    return result
 
 
-# ── Pipeline ──────────────────────────────────────────────────────────────────
-
-def run_pipeline():
-    """Main pipeline: fetch → analyse → save recommendations."""
-    from src.db import add_recommendation
-
-    all_value_bets = []
-    n_sports_with_data = 0
+# ── Auto-plassering ─────────────────────────────────────────────────────────
+def place_bet_auto(bet: Dict, stake: float, bet_type: str = 'single', parlay_id: str = None) -> bool:
+    """
+    Plasser et bet automatisk hvis AUTO_PLACE_BETS er aktivert.
+    Logger alltid til database uansett.
+    """
+    from src.db import add_recommendation, log_betting_action
+    
     today_str = datetime.now().strftime('%Y-%m-%d')
-
-    if not ODDS_API_KEY:
-        logger.warning("No ODDS_API_KEY found — using mock data")
-        mock_events = generate_mock_data()
-        for i, sport in enumerate(SPORTS):
-            league = SPORT_LABELS.get(sport, sport)
-            # Use a subset of mock events per sport
-            sport_events = mock_events[i % len(mock_events):i % len(mock_events) + 3]
-            for event in sport_events:
-                parsed = parse_bookmaker_odds(event)
-                bets = find_value_bets(parsed)
-                for b in bets:
-                    b['league'] = league
-                all_value_bets.extend(bets)
-            if sport_events:
-                n_sports_with_data += 1
+    
+    # Sjekk om vi kan plassere flere bets
+    if not can_place_bet():
+        logger.info(f"Daglig limit nådd, skipper bet: {bet['match']}")
+        return False
+    
+    # Sjekk min edge for auto-plassering
+    if bet['edge_pct'] < MIN_EDGE_FOR_AUTO:
+        logger.info(f"Edge for lav ({bet['edge_pct']:.1f}% < {MIN_EDGE_FOR_AUTO}%), skipper auto-place")
+        return False
+    
+    # Legg til i database
+    rec_id = add_recommendation(
+        date=today_str,
+        match=bet['match'],
+        league=bet['league'],
+        market=bet['market'],
+        selection=bet['selection'],
+        odds=bet['odds'],
+        true_probability=bet['true_probability'],
+        implied_probability=bet['implied_probability'],
+        edge_pct=bet['edge_pct'],
+        recommended_stake=stake,
+        bet_type=bet_type,
+        parlay_id=parlay_id,
+    )
+    
+    # Logg handlingen
+    action = 'placed_auto' if AUTO_PLACE_BETS else 'placed_manual'
+    log_betting_action(
+        recommendation_id=rec_id,
+        action=action,
+        details=f"Stake: {stake:.0f} NOK, Edge: {bet['edge_pct']:.1f}%, Paper: {PAPER_MODE}"
+    )
+    
+    # Send varsel
+    if AUTO_PLACE_BETS:
+        notify_bet_placed(bet, stake, is_auto=True)
+        logger.info(f"✅ Auto-plassert bet: {bet['match']} @ {bet['odds']:.2f}")
     else:
-        for sport in SPORTS:
-            league = SPORT_LABELS.get(sport, sport)
-            events = fetch_odds(sport)
-            if not events:
-                continue
-            n_sports_with_data += 1
-            for event in events:
-                parsed = parse_bookmaker_odds(event)
-                bets = find_value_bets(parsed)
-                for b in bets:
-                    b['league'] = league
-                all_value_bets.extend(bets)
+        logger.info(f"📋 Anbefaling lagret (manuell): {bet['match']} @ {bet['odds']:.2f}")
+    
+    return True
 
-    # Build parlays
-    parlay_legs = build_parlays(all_value_bets)
 
-    # Save singles
-    for bet in all_value_bets:
-        add_recommendation(
-            date=today_str,
-            match=bet['match'],
-            league=bet['league'],
-            market=bet['market'],
-            selection=bet['selection'],
-            odds=bet['odds'],
-            true_probability=bet['true_probability'],
-            implied_probability=bet['implied_probability'],
-            edge_pct=bet['edge_pct'],
-            recommended_stake=bet['recommended_stake'],
-            bet_type='single',
-            parlay_id=None,
+# ── Hoved Pipeline ──────────────────────────────────────────────────────────
+def run_pipeline(auto_place: bool = None):
+    """
+    Hovedpipeline for å hente odds, finne value bets og plassere.
+    
+    Args:
+        auto_place: Overstyr AUTO_PLACE_BETS config (default: None = bruk config)
+    """
+    from src.db import init_db, add_recommendation
+    init_db()
+    
+    if auto_place is None:
+        auto_place = AUTO_PLACE_BETS
+    
+    today_str = datetime.now().strftime('%Y-%m-%d')
+    all_best_bets = []
+    
+    logger.info(f"Starter pipeline - Auto-place: {auto_place}, Paper mode: {PAPER_MODE}")
+
+    # Hent odds for alle sports
+    for sport in SPORTS:
+        league = SPORT_LABELS[sport]
+        events = fetch_odds(sport)
+        for event in events:
+            bet = get_best_bets_per_fixture(event, league)
+            if bet:
+                all_best_bets.append(bet)
+
+    logger.info(f"Totalt {len(all_best_bets)} kandidater funnet")
+
+    # Sorter etter edge og ta topp 15
+    all_best_bets.sort(key=lambda x: x['edge_pct'], reverse=True)
+    top_bets = all_best_bets[:15]
+
+    # Plasser enkeltbets med Kelly sizing
+    placed_count = 0
+    for bet in top_bets[:10]:  # Maks 10 singles
+        if not can_place_bet():
+            break
+        
+        # Bruk Kelly for stake
+        stake = kelly_criterion(bet['true_probability'], bet['odds'])
+        if stake <= 0:
+            continue
+        
+        if auto_place and bet['edge_pct'] >= MIN_EDGE_FOR_AUTO:
+            if place_bet_auto(bet, stake, 'single'):
+                placed_count += 1
+        else:
+            # Lagre som anbefaling uansett
+            add_recommendation(
+                date=today_str,
+                match=bet['match'],
+                league=bet['league'],
+                market=bet['market'],
+                selection=bet['selection'],
+                odds=bet['odds'],
+                true_probability=bet['true_probability'],
+                implied_probability=bet['implied_probability'],
+                edge_pct=bet['edge_pct'],
+                recommended_stake=stake,
+                bet_type='single',
+                parlay_id=None,
+            )
+
+    # Bygg og plasser parlays
+    parlays = build_parlays(all_best_bets)
+    for p in parlays:
+        if not can_place_bet():
+            break
+        
+        for leg in p['legs']:
+            stake = p['stake']  # Fast stake for parlays
+            
+            if auto_place and leg['edge_pct'] >= MIN_EDGE_FOR_AUTO:
+                place_bet_auto(leg, stake, 'parlay', p['parlay_id'])
+            else:
+                add_recommendation(
+                    date=today_str,
+                    match=leg['match'],
+                    league=leg['league'],
+                    market=leg['market'],
+                    selection=leg['selection'],
+                    odds=leg['odds'],
+                    true_probability=leg['true_probability'],
+                    implied_probability=leg['implied_probability'],
+                    edge_pct=leg['edge_pct'],
+                    recommended_stake=stake,
+                    bet_type='parlay',
+                    parlay_id=p['parlay_id'],
+                )
+
+    logger.info(f"Pipeline fullført: {placed_count} auto-plasserte bets")
+    print(f"✅ Pipeline fullført: {placed_count} auto-plasserte bets")
+    print(f"📊 Totalt {len(top_bets)} enkeltbets og {len(parlays)} parlays funnet")
+    
+    for p in parlays:
+        legs_str = " + ".join(
+            f"{b['selection']} ({b['match'].split(' vs ')[0]})"
+            for b in p['legs']
         )
-
-    # Save parlay legs
-    for leg in parlay_legs:
-        add_recommendation(
-            date=today_str,
-            match=leg['match'],
-            league=leg['league'],
-            market=leg['market'],
-            selection=leg['selection'],
-            odds=leg['odds'],
-            true_probability=leg['true_probability'],
-            implied_probability=leg['implied_probability'],
-            edge_pct=leg['edge_pct'],
-            recommended_stake=leg['recommended_stake'],
-            bet_type='parlay',
-            parlay_id=leg['parlay_id'],
-        )
-
-    n_singles = len(all_value_bets)
-    n_parlay_legs = len(parlay_legs)
-    print(f"✅ Found {n_singles} single bets, {n_parlay_legs} parlay legs across {n_sports_with_data} sports")
+        print(f"  {len(p['legs'])}-leg @ {p['combined_odds']:.1f}x | {legs_str}")
+    
+    return placed_count
 
 
-# ── Settle ────────────────────────────────────────────────────────────────────
-
-def settle_bets():
-    """Check completed matches and settle open recommendations."""
-    from src.db import list_recommendations, settle_recommendation
-
+# ── Resultat-sjekking ───────────────────────────────────────────────────────
+def settle_bets(send_notifications: bool = True) -> int:
+    """
+    Sjekk resultater for åpne bets og oppdater status.
+    
+    Args:
+        send_notifications: Send Telegram-varsler ved seier/tap
+    
+    Returns:
+        Antall settled bets
+    """
+    from src.db import (
+        list_recommendations, settle_recommendation, 
+        get_balance, set_balance, update_performance_stats,
+        log_betting_action
+    )
+    
     open_recs = list_recommendations(status='open')
     if not open_recs:
-        print("No open recommendations to settle.")
-        return
+        logger.info("Ingen åpne bets å sjekke")
+        return 0
 
-    settled_count = 0
-
+    settled = 0
+    learning_data = []
+    
     for sport in SPORTS:
-        if not ODDS_API_KEY:
-            logger.warning(f"No API key — cannot settle {sport}")
-            continue
-
-        url = (
-            f"{BASE_URL}/sports/{sport}/scores/"
-            f"?apiKey={ODDS_API_KEY}&daysFrom=3"
-        )
         try:
-            resp = requests.get(url, timeout=15)
+            resp = requests.get(
+                f"{BASE_URL}/sports/{sport}/scores/",
+                params={'apiKey': ODDS_API_KEY, 'daysFrom': 3},
+                timeout=15
+            )
             resp.raise_for_status()
             scores = resp.json()
         except Exception as e:
-            logger.warning(f"Failed to fetch scores for {sport}: {e}")
+            logger.warning(f"Kunne ikke hente scores for {sport}: {e}")
             continue
 
-        completed = [s for s in scores if s.get('completed')]
-
-        for score_event in completed:
-            home = score_event.get('home_team', '')
-            away = score_event.get('away_team', '')
-            match_name = f"{home} vs {away}"
-
-            # Find open recs that match this fixture
-            matching_recs = [r for r in open_recs if r['match'] == match_name]
-            if not matching_recs:
+        for s in scores:
+            if not s.get('completed'):
+                continue
+            
+            match_name = f"{s['home_team']} vs {s['away_team']}"
+            matching = [r for r in open_recs if r['match'] == match_name]
+            if not matching:
                 continue
 
-            # Parse scores
-            scores_data = score_event.get('scores') or []
-            home_score = None
-            away_score = None
-            for s in scores_data:
-                if s['name'] == home:
-                    home_score = int(s['score'])
-                elif s['name'] == away:
-                    away_score = int(s['score'])
-
+            scores_data = s.get('scores') or []
+            home_score = next((int(x['score']) for x in scores_data if x['name'] == s['home_team']), None)
+            away_score = next((int(x['score']) for x in scores_data if x['name'] == s['away_team']), None)
             if home_score is None or away_score is None:
                 continue
 
             total_goals = home_score + away_score
-            actual_result = f"{home_score}-{away_score}"
+            actual = f"{home_score}-{away_score}"
 
-            for rec in matching_recs:
-                selection = rec['selection']
-                market = rec['market']
+            for rec in matching:
+                sel = rec['selection']
+                mkt = rec['market']
                 won = False
 
-                if market == 'h2h':
-                    if selection == home:
+                if mkt == 'h2h':
+                    if sel == s['home_team']:
                         won = home_score > away_score
-                    elif selection == away:
+                    elif sel == s['away_team']:
                         won = away_score > home_score
-                    elif selection == 'Draw':
+                    elif sel == 'Draw':
                         won = home_score == away_score
-                elif market == 'totals':
-                    if 'Over' in selection:
-                        try:
-                            line = float(selection.split(' ')[1])
-                            won = total_goals > line
-                        except (IndexError, ValueError):
-                            pass
-                    elif 'Under' in selection:
-                        try:
-                            line = float(selection.split(' ')[1])
-                            won = total_goals < line
-                        except (IndexError, ValueError):
-                            pass
-                elif market == 'btts':
-                    btts = home_score > 0 and away_score > 0
-                    if selection == 'Yes':
-                        won = btts
-                    elif selection == 'No':
-                        won = not btts
+                elif mkt == 'totals':
+                    try:
+                        line = float(sel.split()[-1])
+                        won = total_goals > line if 'Over' in sel else total_goals < line
+                    except:
+                        pass
 
-                settle_recommendation(rec['id'], actual_result, won)
-                outcome_str = 'WON' if won else 'LOST'
-                print(f"✅ Settled: {match_name} — {selection} — {outcome_str}")
-                settled_count += 1
+                # Settle bet
+                settle_recommendation(rec['id'], actual, won)
+                
+                # Hent PnL
+                from src.db import get_conn
+                conn = get_conn()
+                row = conn.execute("SELECT pnl FROM recommendations WHERE id=?", (rec['id'],)).fetchone()
+                pnl = row['pnl'] if row else 0
+                conn.close()
 
-    if settled_count == 0:
-        print("No matching completed fixtures found for open recommendations.")
-    else:
-        print(f"\n✅ Settled {settled_count} recommendation(s).")
+                # Oppdater bankroll
+                balance = get_balance()
+                if won:
+                    payout = rec['recommended_stake'] * rec['odds']
+                    set_balance(balance + payout)
+                    logger.info(f"Bankroll oppdatert: +{payout:.0f} NOK (seier)")
+                
+                # Logg handling
+                log_betting_action(
+                    recommendation_id=rec['id'],
+                    action='settled',
+                    details=f"Result: {'won' if won else 'lost'}, Actual: {actual}, PnL: {pnl:.0f}"
+                )
+                
+                # Oppdater performance stats
+                update_performance_stats(
+                    league=rec['league'],
+                    market=rec['market'],
+                    won=won,
+                    stake=rec['recommended_stake'],
+                    pnl=pnl
+                )
+                
+                # Samle læringsdata
+                learning_data.append({
+                    'league': rec['league'],
+                    'market': rec['market'],
+                    'edge_pct': rec['edge_pct'],
+                    'odds': rec['odds'],
+                    'won': won,
+                })
+
+                # Send varsel
+                if send_notifications:
+                    notify_settlement(match_name, sel, won, pnl, actual)
+                
+                logger.info(f"{'✅ WON' if won else '❌ LOST'}: {match_name} — {sel} ({actual})")
+                settled += 1
+
+    # Logg læring
+    if learning_data:
+        log_learning_data(learning_data)
+
+    logger.info(f"Settlet {settled} bet(s)")
+    print(f"\nSettlet {settled} bet(s)." if settled else "Ingen fullførte kamper ennå.")
+    return settled
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
+def log_learning_data(data: List[Dict]):
+    """Logg læringsdata for å forbedre modellen over tid."""
+    log_file = os.path.join(_ROOT, 'data', 'learning_log.jsonl')
+    try:
+        with open(log_file, 'a') as f:
+            for entry in data:
+                entry['timestamp'] = datetime.now().isoformat()
+                f.write(json.dumps(entry) + '\n')
+        logger.info(f"Logget {len(data)} læringsposter")
+    except Exception as e:
+        logger.warning(f"Kunne ikke logge læringsdata: {e}")
 
+
+# ── Hoved-funksjon ───────────────────────────────────────────────────────────
 def main():
     from src.db import init_db
     init_db()
-
-    parser = argparse.ArgumentParser(description='OddsBot — betting recommendation engine')
-    parser.add_argument('--run', action='store_true', help='Fetch + analyse + save recommendations')
-    parser.add_argument('--settle', action='store_true', help='Settle completed bets via scores API')
+    
+    parser = argparse.ArgumentParser(description='Odds Bot - Auto-betting motor')
+    parser.add_argument('--run', action='store_true', help='Kjør pipeline')
+    parser.add_argument('--settle', action='store_true', help='Sjekk resultater')
+    parser.add_argument('--auto', action='store_true', help='Aktiver auto-place (overstyrer config)')
+    parser.add_argument('--no-auto', action='store_true', help='Deaktiver auto-place (overstyrer config)')
+    parser.add_argument('--daily-summary', action='store_true', help='Send daglig sammendrag')
     args = parser.parse_args()
-
-    if args.settle:
+    
+    # Bestem auto-place modus
+    auto_place = None
+    if args.auto:
+        auto_place = True
+    elif args.no_auto:
+        auto_place = False
+    
+    if args.daily_summary:
+        notify_daily_summary()
+    elif args.settle:
         settle_bets()
     else:
-        # Default to run (also triggers with --run or no flag)
-        run_pipeline()
+        run_pipeline(auto_place=auto_place)
 
 
 if __name__ == '__main__':
