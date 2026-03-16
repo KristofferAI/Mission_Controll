@@ -49,14 +49,14 @@ MIN_STAKE = 50.0
 MAX_STAKE = 200.0
 DEFAULT_BANKROLL = 1000.0
 
-# Parlay config
+# Parlay config - FOKUS PÅ 10x+ ODDS PARLAYS
 PARLAY_STAKE = 50.0
 SINGLE_STAKE = 30.0
-MIN_PARLAY_ODDS = 10.0
-MAX_PARLAY_ODDS = 60.0
-MIN_LEGS = 2  # Nå støtter vi 2-leg parlays også
-MAX_LEGS = 5
-TOP_PARLAYS = 5
+MIN_PARLAY_ODDS = 10.0    # Minst 10x odds
+MAX_PARLAY_ODDS = 100.0   # Opptil 100x odds
+MIN_LEGS = 2              # 2-leg parlays (10-25x odds)
+MAX_LEGS = 4              # Maks 4 legs
+TOP_PARLAYS = 8           # Vis 8 parlays
 
 SPORTS = [
     'soccer_epl', 'soccer_uefa_champs_league', 'soccer_uefa_europa_league',
@@ -332,18 +332,22 @@ def format_selection(market: str, selection: str) -> str:
 # ── Smart Parlay-bygging ────────────────────────────────────────────────────
 def build_parlays(all_bets: List[Dict]) -> List[Dict]:
     """
-    Bygg parlays som minimerer korrelasjon:
-    - Maks 1 bet per liga i samme parlay
-    - 2-5 legs (inkludert 2-leg nå)
-    - Kombinerte odds mellom MIN og MAX
-    - Sortert etter kombinert EV
+    Bygg VALUE PARLAYS med 10x+ odds for maksimal avkastning:
+    - 2-4 legs per parlay (fokus på 2-3 legs)
+    - Maks 1 bet per liga (minimerer korrelasjon)
+    - Kun forskjellige kamper
+    - Kombinerte odds 10x-100x
+    - Sortert etter kombinert edge
+    - Perfekt for CL/EL/Cup-uker og helger
     """
     if len(all_bets) < MIN_LEGS:
+        logger.warning(f"For få bets ({len(all_bets)}) for å bygge parlays")
         return []
 
     today_str = datetime.now().strftime('%Y%m%d')
     candidates = []
 
+    # Prøv 2-leg, 3-leg, og 4-leg parlays
     for n in range(MIN_LEGS, min(MAX_LEGS + 1, len(all_bets) + 1)):
         for combo in itertools.combinations(all_bets, n):
             # Sjekk at alle er fra forskjellige kamper
@@ -351,66 +355,69 @@ def build_parlays(all_bets: List[Dict]) -> List[Dict]:
             if len(set(fixture_ids)) < n:
                 continue
             
-            # Sjekk at maks 1 bet per liga
+            # Sjekk at maks 1 bet per liga (viktig for å minimere korrelasjon)
             leagues = [b['league'] for b in combo]
             if len(leagues) != len(set(leagues)):
                 continue
 
+            # Beregn kombinerte odds og edge
             combined_odds = 1.0
+            combined_edge = 0.0
+            combined_true_prob = 1.0
+            
             for b in combo:
                 combined_odds *= b['odds']
+                combined_edge += b['edge_pct']
+                combined_true_prob *= b['true_probability']
 
+            # Sjekk at odds er innenfor range (10x-100x)
             if not (MIN_PARLAY_ODDS <= combined_odds <= MAX_PARLAY_ODDS):
                 continue
-
-            combined_ev = sum(b['edge_pct'] for b in combo)
-            combined_true_prob = 1.0
-            for b in combo:
-                combined_true_prob *= b['true_probability']
+            
+            # Sjekk at hver leg har minst 2% edge
+            min_edge = min(b['edge_pct'] for b in combo)
+            if min_edge < 2.0:
+                continue
 
             candidates.append({
                 'legs': list(combo),
                 'combined_odds': combined_odds,
-                'combined_ev': combined_ev,
+                'combined_ev': combined_edge,
                 'combined_true_prob': combined_true_prob,
                 'n_legs': n,
             })
 
-    # Sorter etter kombinert EV
-    candidates.sort(key=lambda x: x['combined_ev'], reverse=True)
+    if not candidates:
+        logger.warning("Ingen parlay-kandidater funnet med nåværende kriterier")
+        return []
 
-    # Prioriter Premier League parlays først
-    epl_candidates = [c for c in candidates if any(b['league'] == 'Premier League' for b in c['legs'])]
-    other_candidates = [c for c in candidates if not any(b['league'] == 'Premier League' for b in c['legs'])]
+    # Sorter etter kombinert edge (høyest først)
+    candidates.sort(key=lambda x: (x['combined_ev'], x['combined_odds']), reverse=True)
+    
+    logger.info(f"Fant {len(candidates)} parlay-kandidater")
 
+    # Velg topp parlays med variasjon
     result = []
     used_parlays = set()
+    
+    # Grupper etter antall legs for variasjon
+    two_legs = [c for c in candidates if c['n_legs'] == 2][:3]
+    three_legs = [c for c in candidates if c['n_legs'] == 3][:3]
+    four_legs = [c for c in candidates if c['n_legs'] == 4][:2]
+    
+    prioritized = two_legs + three_legs + four_legs
 
-    # Legg inn EPL-parlays først
-    for p in epl_candidates[:2]:
-        key = frozenset(b['fixture_id'] for b in p['legs'])
-        if key in used_parlays:
-            continue
-        used_parlays.add(key)
-        pid = f"parlay_{today_str}_epl_{len(result)}"
-        result.append({
-            'parlay_id': pid,
-            'legs': p['legs'],
-            'combined_odds': p['combined_odds'],
-            'combined_ev': p['combined_ev'],
-            'combined_true_prob': p['combined_true_prob'],
-            'stake': PARLAY_STAKE,
-        })
-
-    # Fyll opp med beste øvrige
-    for p in other_candidates:
+    for p in prioritized:
         if len(result) >= TOP_PARLAYS:
             break
+            
         key = frozenset(b['fixture_id'] for b in p['legs'])
         if key in used_parlays:
             continue
+        
         used_parlays.add(key)
-        pid = f"parlay_{today_str}_{len(result)}"
+        pid = f"parlay_{today_str}_{p['n_legs']}leg_{len(result)}"
+        
         result.append({
             'parlay_id': pid,
             'legs': p['legs'],
@@ -421,6 +428,12 @@ def build_parlays(all_bets: List[Dict]) -> List[Dict]:
         })
 
     logger.info(f"Bygget {len(result)} parlays fra {len(all_bets)} kandidater")
+    
+    # Logg detaljer
+    for p in result:
+        legs_str = " + ".join(f"{b['match'][:20]}" for b in p['legs'])
+        logger.info(f"  → {len(p['legs'])}-leg @ {p['combined_odds']:.1f}x | {legs_str}")
+    
     return result
 
 
@@ -512,11 +525,49 @@ def run_pipeline(auto_place: bool = None):
     all_best_bets.sort(key=lambda x: x['edge_pct'], reverse=True)
     top_bets = all_best_bets[:15]
 
-    # Plasser enkeltbets med Kelly sizing
-    placed_count = 0
-    for bet in top_bets[:10]:  # Maks 10 singles
+    # Bygg og plasser PARLAYS FØRST (hovedfokus)
+    parlays = build_parlays(all_best_bets)
+    parlay_placed_count = 0
+    
+    for p in parlays:
         if not can_place_bet():
             break
+        
+        for leg in p['legs']:
+            stake = p['stake']  # Fast stake for parlays
+            
+            if auto_place and leg['edge_pct'] >= MIN_EDGE_FOR_AUTO:
+                if place_bet_auto(leg, stake, 'parlay', p['parlay_id']):
+                    parlay_placed_count += 1
+            else:
+                add_recommendation(
+                    date=today_str,
+                    match=leg['match'],
+                    league=leg['league'],
+                    market=leg['market'],
+                    selection=leg['selection'],
+                    odds=leg['odds'],
+                    true_probability=leg['true_probability'],
+                    implied_probability=leg['implied_probability'],
+                    edge_pct=leg['edge_pct'],
+                    recommended_stake=stake,
+                    bet_type='parlay',
+                    parlay_id=p['parlay_id'],
+                )
+
+    # Plasser SINGLE BETS (sekundært - kun maks 3)
+    singles_placed = 0
+    for bet in top_bets[:3]:  # Kun 3 singles, resten er parlays
+        if not can_place_bet():
+            break
+        
+        # Sjekk om denne kampen allerede er i en parlay
+        bet_in_parlay = any(
+            any(leg['fixture_id'] == bet['fixture_id'] for leg in p['legs'])
+            for p in parlays
+        )
+        if bet_in_parlay:
+            continue
         
         # Bruk Kelly for stake
         stake = kelly_criterion(bet['true_probability'], bet['odds'])
@@ -525,7 +576,7 @@ def run_pipeline(auto_place: bool = None):
         
         if auto_place and bet['edge_pct'] >= MIN_EDGE_FOR_AUTO:
             if place_bet_auto(bet, stake, 'single'):
-                placed_count += 1
+                singles_placed += 1
         else:
             # Lagre som anbefaling uansett
             add_recommendation(
@@ -543,45 +594,34 @@ def run_pipeline(auto_place: bool = None):
                 parlay_id=None,
             )
 
-    # Bygg og plasser parlays
-    parlays = build_parlays(all_best_bets)
-    for p in parlays:
-        if not can_place_bet():
-            break
-        
-        for leg in p['legs']:
-            stake = p['stake']  # Fast stake for parlays
-            
-            if auto_place and leg['edge_pct'] >= MIN_EDGE_FOR_AUTO:
-                place_bet_auto(leg, stake, 'parlay', p['parlay_id'])
-            else:
-                add_recommendation(
-                    date=today_str,
-                    match=leg['match'],
-                    league=leg['league'],
-                    market=leg['market'],
-                    selection=leg['selection'],
-                    odds=leg['odds'],
-                    true_probability=leg['true_probability'],
-                    implied_probability=leg['implied_probability'],
-                    edge_pct=leg['edge_pct'],
-                    recommended_stake=stake,
-                    bet_type='parlay',
-                    parlay_id=p['parlay_id'],
-                )
-
-    logger.info(f"Pipeline fullført: {placed_count} auto-plasserte bets")
-    print(f"✅ Pipeline fullført: {placed_count} auto-plasserte bets")
-    print(f"📊 Totalt {len(top_bets)} enkeltbets og {len(parlays)} parlays funnet")
+    total_placed = singles_placed + parlay_placed_count
+    logger.info(f"Pipeline fullført: {total_placed} auto-plasserte bets")
     
-    for p in parlays:
-        legs_str = " + ".join(
-            f"{b['selection']} ({b['match'].split(' vs ')[0]})"
-            for b in p['legs']
-        )
-        print(f"  {len(p['legs'])}-leg @ {p['combined_odds']:.1f}x | {legs_str}")
+    print(f"\n{'='*60}")
+    print(f"✅ PIPELINE FULLFØRT")
+    print(f"{'='*60}")
+    print(f"\n📊 Oppsummering:")
+    print(f"   • {singles_placed} enkeltbets")
+    print(f"   • {len(parlays)} PARLAYS (hovedfokus)")
+    print(f"   • {parlay_placed_count} parlay-legs auto-plassert")
+    print(f"   • {total_placed} totalt auto-plassert")
     
-    return placed_count
+    if parlays:
+        print(f"\n🎯 DAGENS PARLAYS (10x+ odds):")
+        for i, p in enumerate(parlays, 1):
+            legs_str = " + ".join(
+                f"{b['match'].split(' vs ')[0]}"
+                for b in p['legs']
+            )
+            potential = p['stake'] * p['combined_odds']
+            print(f"\n   {i}. {len(p['legs'])}-leg @ {p['combined_odds']:.1f}x")
+            print(f"      Innsats: {p['stake']:.0f} NOK")
+            print(f"      Potensiell gevinst: {potential:.0f} NOK")
+            print(f"      Kamper: {legs_str}")
+    
+    print(f"\n{'='*60}\n")
+    
+    return total_placed
 
 
 # ── Resultat-sjekking ───────────────────────────────────────────────────────

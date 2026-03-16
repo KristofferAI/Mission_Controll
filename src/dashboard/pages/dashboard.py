@@ -2,7 +2,7 @@ import streamlit as st
 import sys
 import os
 import subprocess
-from datetime import datetime
+from datetime import datetime, date
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 if _ROOT not in sys.path:
@@ -21,7 +21,7 @@ st.markdown("""
         background: linear-gradient(135deg, #0f0f1e 0%, #1a1a2e 50%, #16213e 100%);
     }
     
-    /* Hero stats cards */
+    /* HERO SECTION */
     .hero-card {
         background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
         border-radius: 16px;
@@ -58,130 +58,192 @@ st.markdown("""
         margin: 0;
     }
     
-    /* Odds Category Cards */
-    .odds-category {
-        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-        border: 2px solid #6366f144;
+    /* PARLAY CARDS - HOVEDFOKUS */
+    .parlay-card {
+        background: linear-gradient(135deg, rgba(245, 158, 11, 0.15) 0%, rgba(245, 158, 11, 0.05) 100%);
+        border: 2px solid #f59e0b;
         border-radius: 16px;
         padding: 1.5rem;
         margin-bottom: 1.5rem;
     }
     
-    .odds-category-header {
+    .parlay-header {
         display: flex;
         justify-content: space-between;
         align-items: center;
         margin-bottom: 1rem;
         padding-bottom: 0.75rem;
-        border-bottom: 1px solid #6366f122;
+        border-bottom: 1px solid #f59e0b44;
     }
     
-    .odds-category-title {
+    .parlay-title {
         font-size: 1.3rem;
-        font-weight: 600;
-        color: #f1f5f9;
+        font-weight: 700;
+        color: #f59e0b;
         display: flex;
         align-items: center;
         gap: 0.5rem;
     }
     
-    .odds-category-count {
-        background: #6366f1;
-        color: white;
-        padding: 0.25rem 0.75rem;
-        border-radius: 20px;
-        font-size: 0.85rem;
+    .parlay-odds {
+        background: linear-gradient(135deg, #f59e0b, #fbbf24);
+        color: #000;
+        padding: 0.5rem 1rem;
+        border-radius: 10px;
+        font-weight: 800;
+        font-size: 1.4rem;
+    }
+    
+    .parlay-leg {
+        background: rgba(26, 26, 46, 0.8);
+        border: 1px solid #f59e0b33;
+        border-radius: 10px;
+        padding: 1rem;
+        margin-bottom: 0.75rem;
+    }
+    
+    .parlay-leg-match {
+        font-weight: 600;
+        color: #f1f5f9;
+        font-size: 1.1rem;
+        margin-bottom: 0.25rem;
+    }
+    
+    .parlay-leg-league {
+        font-size: 0.8rem;
+        color: #94a3b8;
+        margin-bottom: 0.5rem;
+    }
+    
+    .parlay-leg-bet {
+        background: linear-gradient(90deg, rgba(245, 158, 11, 0.2), transparent);
+        padding: 0.5rem 0.75rem;
+        border-radius: 6px;
+        border-left: 3px solid #f59e0b;
+        color: #f1f5f9;
         font-weight: 500;
     }
     
-    /* Bet Card */
+    .parlay-footer {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 1rem;
+        padding-top: 1rem;
+        border-top: 1px solid #f59e0b44;
+    }
+    
+    /* SINGLE BET CARDS */
     .bet-card {
         background: rgba(99, 102, 241, 0.1);
         border: 1px solid #6366f133;
         border-radius: 12px;
-        padding: 1rem;
+        padding: 1.25rem;
         margin-bottom: 0.75rem;
-        transition: all 0.2s;
     }
     
-    .bet-card:hover {
-        border-color: #6366f1;
-        background: rgba(99, 102, 241, 0.15);
-    }
-    
-    .bet-card-header {
+    .bet-header {
         display: flex;
         justify-content: space-between;
         align-items: flex-start;
-        margin-bottom: 0.5rem;
+        margin-bottom: 0.75rem;
     }
     
     .bet-match {
-        font-weight: 600;
+        font-weight: 700;
         color: #f1f5f9;
-        font-size: 1.1rem;
+        font-size: 1.15rem;
     }
     
     .bet-league {
         font-size: 0.8rem;
         color: #94a3b8;
+        margin-top: 0.25rem;
     }
     
     .bet-odds {
         background: linear-gradient(135deg, #6366f1, #8b5cf6);
         color: white;
-        padding: 0.35rem 0.75rem;
+        padding: 0.4rem 0.8rem;
         border-radius: 8px;
         font-weight: 700;
         font-size: 1.1rem;
     }
     
+    .bet-description {
+        background: linear-gradient(90deg, rgba(99, 102, 241, 0.2), transparent);
+        padding: 0.75rem;
+        border-radius: 8px;
+        border-left: 3px solid #6366f1;
+        margin: 0.75rem 0;
+    }
+    
+    .bet-description-text {
+        color: #f1f5f9;
+        font-size: 1rem;
+        font-weight: 500;
+    }
+    
     .bet-details {
         display: flex;
-        gap: 1rem;
-        margin-top: 0.75rem;
+        gap: 1.5rem;
         flex-wrap: wrap;
+        margin-top: 0.75rem;
     }
     
     .bet-detail {
         display: flex;
-        align-items: center;
-        gap: 0.35rem;
-        font-size: 0.85rem;
+        flex-direction: column;
+        gap: 0.2rem;
+    }
+    
+    .bet-detail-label {
+        font-size: 0.75rem;
         color: #94a3b8;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
     }
     
     .bet-detail-value {
         color: #f1f5f9;
-        font-weight: 500;
+        font-weight: 600;
+        font-size: 1rem;
     }
     
-    .edge-high { color: #22c55e; font-weight: 600; }
-    .edge-medium { color: #f59e0b; font-weight: 600; }
+    .edge-high { color: #22c55e; }
+    .edge-medium { color: #f59e0b; }
     .edge-low { color: #94a3b8; }
+    
+    /* Section Headers */
+    .section-header {
+        background: linear-gradient(90deg, rgba(99, 102, 241, 0.2), transparent);
+        padding: 1rem 1.25rem;
+        border-radius: 12px;
+        border-left: 4px solid #6366f1;
+        margin: 1.5rem 0 1rem 0;
+    }
+    
+    .section-title {
+        font-size: 1.4rem;
+        font-weight: 700;
+        color: #f1f5f9;
+        margin: 0;
+    }
+    
+    .section-subtitle {
+        font-size: 0.9rem;
+        color: #94a3b8;
+        margin-top: 0.25rem;
+    }
     
     /* No bets message */
     .no-bets {
         text-align: center;
-        padding: 2rem;
+        padding: 3rem;
         color: #94a3b8;
-    }
-    
-    /* Quick action buttons */
-    .quick-action {
-        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-        border: 1px solid #6366f144;
-        border-radius: 12px;
-        padding: 1rem;
-        text-align: center;
-        transition: all 0.3s ease;
-        cursor: pointer;
-    }
-    
-    .quick-action:hover {
-        border-color: #6366f1;
-        transform: translateY(-2px);
-        box-shadow: 0 8px 20px -5px rgba(99, 102, 241, 0.3);
+        background: rgba(26, 26, 46, 0.5);
+        border-radius: 16px;
+        border: 2px dashed #6366f133;
     }
     
     /* Result cards */
@@ -225,135 +287,153 @@ st.markdown("""
         -webkit-text-fill-color: transparent;
         background-clip: text;
     }
-    
-    .top-bet-banner {
-        background: linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(34, 211, 238, 0.1) 100%);
-        border: 2px solid #6366f1;
-        border-radius: 16px;
-        padding: 1.5rem;
-        margin-bottom: 2rem;
-        text-align: center;
-    }
-    
-    .top-bet-title {
-        font-size: 0.9rem;
-        color: #6366f1;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        margin-bottom: 0.5rem;
-    }
-    
-    .top-bet-match {
-        font-size: 1.5rem;
-        font-weight: 700;
-        color: #f1f5f9;
-        margin-bottom: 0.5rem;
-    }
-    
-    .top-bet-details {
-        font-size: 1.1rem;
-        color: #94a3b8;
-    }
 </style>
 """, unsafe_allow_html=True)
 
 
-def categorize_by_odds(recommendations):
-    """Kategoriser bets etter odds-størrelse."""
-    categories = {
-        'low': [],      # 1.5 - 3.0 (Sikre)
-        'medium': [],   # 3.0 - 10.0 (Balansert)
-        'high': [],     # 10.0 - 50.0 (Value)
-        'extreme': []   # 50.0+ (Longshots)
-    }
-    
-    for r in recommendations:
-        odds = r.get('odds', 0)
-        if odds < 3.0:
-            categories['low'].append(r)
-        elif odds < 10.0:
-            categories['medium'].append(r)
-        elif odds < 50.0:
-            categories['high'].append(r)
-        else:
-            categories['extreme'].append(r)
-    
-    return categories
-
-
-def format_market(market, selection):
-    """Formater market og selection for visning."""
+def format_bet_description(market, selection, home_team, away_team):
+    """
+    Formater bet-beskrivelse TYDELIG så bruker forstår nøyaktig hva som skal bettes.
+    """
     if market == 'h2h':
-        return f"Vinner: {selection}"
+        if selection == home_team:
+            return f"🏠 Hjemmeseier: {home_team} slår {away_team}"
+        elif selection == away_team:
+            return f"✈️ Borteseier: {away_team} slår {home_team}"
+        elif selection.lower() in ['draw', 'uavgjort']:
+            return f"🤝 Uavgjort mellom {home_team} og {away_team}"
+        else:
+            return f"🏆 Vinner: {selection}"
+    
     elif market == 'totals':
+        # "Over 2.5" eller "Under 2.5"
+        if 'over' in selection.lower():
+            line = selection.split()[-1]
+            return f"⬆️ Over {line} mål totalt (mer enn {line} mål i kampen)"
+        elif 'under' in selection.lower():
+            line = selection.split()[-1]
+            return f"⬇️ Under {line} mål totalt (færre enn {line} mål i kampen)"
         return selection
+    
     elif market == 'btts':
-        return f"Begge scorer: {selection}"
+        if selection.lower() in ['yes', 'ja']:
+            return f"⚽ Begge lag scorer minst ett mål"
+        else:
+            return f"🚫 Ikke begge lag scorer"
+    
+    elif market == 'h2h_lay':
+        return f"❌ {selection} vinner IKKE (lay bet)"
+    
     return f"{market}: {selection}"
 
 
-def render_bet_card(bet, is_top=False):
-    """Render en bet card."""
+def parse_match_teams(match_str):
+    """Parse hjemme- og bortelag fra match-string."""
+    if ' vs ' in match_str:
+        parts = match_str.split(' vs ')
+        return parts[0].strip(), parts[1].strip()
+    return match_str, ""
+
+
+def render_bet_card(bet, is_parlay_leg=False):
+    """Render en bet card med TYDELIG beskrivelse."""
+    home, away = parse_match_teams(bet['match'])
+    description = format_bet_description(bet['market'], bet['selection'], home, away)
+    
     edge = bet.get('edge_pct', 0)
     edge_class = 'edge-high' if edge >= 5 else 'edge-medium' if edge >= 2 else 'edge-low'
-    edge_emoji = '🟢' if edge >= 5 else '🟡' if edge >= 2 else '⚪'
+    edge_text = f"{edge:.1f}%"
+    
+    card_class = "parlay-leg" if is_parlay_leg else "bet-card"
     
     st.markdown(f"""
-    <div class="bet-card{' top-bet' if is_top else ''}">
-        <div class="bet-card-header">
+    <div class="{card_class}">
+        <div class="bet-header">
             <div>
                 <div class="bet-match">{bet['match']}</div>
                 <div class="bet-league">{bet['league']}</div>
             </div>
             <div class="bet-odds">{bet['odds']:.2f}x</div>
         </div>
-        <div style="margin: 0.5rem 0; color: #f1f5f9;">
-            {format_market(bet['market'], bet['selection'])}
+        <div class="bet-description">
+            <div class="bet-description-text">{description}</div>
         </div>
         <div class="bet-details">
             <div class="bet-detail">
-                <span>Edge:</span>
-                <span class="bet-detail-value {edge_class}">{edge_emoji} {edge:.1f}%</span>
+                <div class="bet-detail-label">Edge</div>
+                <div class="bet-detail-value {edge_class}">{edge_text}</div>
             </div>
             <div class="bet-detail">
-                <span>Stake:</span>
-                <span class="bet-detail-value">{bet['recommended_stake']:.0f} NOK</span>
+                <div class="bet-detail-label">Sannsynlighet</div>
+                <div class="bet-detail-value">{bet['true_probability']*100:.1f}%</div>
             </div>
             <div class="bet-detail">
-                <span>Type:</span>
-                <span class="bet-detail-value">{bet.get('bet_type', 'single').upper()}</span>
+                <div class="bet-detail-label">Stake</div>
+                <div class="bet-detail-value">{bet['recommended_stake']:.0f} NOK</div>
+            </div>
+            <div class="bet-detail">
+                <div class="bet-detail-label">Type</div>
+                <div class="bet-detail-value">{bet.get('bet_type', 'single').upper()}</div>
             </div>
         </div>
     </div>
     """, unsafe_allow_html=True)
 
 
-def render_odds_category(title, emoji, bets, color):
-    """Render en odds-kategori."""
-    if not bets:
+def render_parlay_card(parlay_id, legs, all_recs):
+    """Render en parlay card med alle legs."""
+    parlay_recs = [r for r in all_recs if r.get('parlay_id') == parlay_id]
+    if not parlay_recs:
         return
     
-    count = len(bets)
+    # Beregn kombinerte odds
+    combined_odds = 1.0
+    for leg in parlay_recs:
+        combined_odds *= leg.get('odds', 1)
+    
+    total_stake = parlay_recs[0].get('recommended_stake', 50) if parlay_recs else 50
+    combined_edge = sum(r.get('edge_pct', 0) for r in parlay_recs) / len(parlay_recs) if parlay_recs else 0
+    
     st.markdown(f"""
-    <div class="odds-category">
-        <div class="odds-category-header">
-            <div class="odds-category-title">
-                <span>{emoji}</span>
-                <span>{title}</span>
-            </div>
-            <div class="odds-category-count">{count} bets</div>
+    <div class="parlay-card">
+        <div class="parlay-header">
+            <div class="parlay-title">🎯 PARLAY - {len(parlay_recs)} kamper</div>
+            <div class="parlay-odds">{combined_odds:.1f}x</div>
         </div>
     """, unsafe_allow_html=True)
     
-    # Sorter etter edge
-    sorted_bets = sorted(bets, key=lambda x: x.get('edge_pct', 0), reverse=True)
+    # Vis hver leg
+    for leg in parlay_recs:
+        home, away = parse_match_teams(leg['match'])
+        description = format_bet_description(leg['market'], leg['selection'], home, away)
+        
+        st.markdown(f"""
+        <div class="parlay-leg">
+            <div class="parlay-leg-match">{leg['match']}</div>
+            <div class="parlay-leg-league">{leg['league']}</div>
+            <div class="parlay-leg-bet">{description} @ {leg['odds']:.2f}x</div>
+        </div>
+        """, unsafe_allow_html=True)
     
-    # Vis topp 5 i denne kategorien
-    for bet in sorted_bets[:5]:
-        render_bet_card(bet)
-    
-    st.markdown("</div>", unsafe_allow_html=True)
+    # Footer med oppsummering
+    potential_win = total_stake * combined_odds
+    st.markdown(f"""
+        <div class="parlay-footer">
+            <div>
+                <div style="color: #94a3b8; font-size: 0.85rem;">Total innsats</div>
+                <div style="color: #f1f5f9; font-weight: 600;">{total_stake:.0f} NOK</div>
+            </div>
+            <div>
+                <div style="color: #94a3b8; font-size: 0.85rem;">Gevinst ved vinn</div>
+                <div style="color: #22c55e; font-weight: 700; font-size: 1.1rem;">{potential_win:.0f} NOK</div>
+            </div>
+            <div>
+                <div style="color: #94a3b8; font-size: 0.85rem;">Snitt edge</div>
+                <div style="color: #f59e0b; font-weight: 600;">{combined_edge:.1f}%</div>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
 
 def render():
@@ -361,7 +441,7 @@ def render():
     
     # ── Header ──────────────────────────────────────────────────────────────
     st.title("🏠 Sports-Bets Dashboard")
-    st.caption("AI-drevet betting-analyse med fokus på value bets")
+    st.caption("AI-drevet betting med fokus på VALUE PARLAYS")
     
     # ── Hent data ───────────────────────────────────────────────────────────
     balance = get_balance()
@@ -472,51 +552,71 @@ def render():
     
     st.markdown("---")
     
-    # ── DAGENS BESTE BETS ───────────────────────────────────────────────────
-    st.header("📅 Dagens Beste Bets")
+    # ── DAGENS PARLAYS (HOVEDFOKUS) ─────────────────────────────────────────
+    st.markdown("""
+    <div class="section-header">
+        <div class="section-title">🎯 DAGENS PARLAYS</div>
+        <div class="section-subtitle">Kombinasjoner av value bets for maksimal avkastning</div>
+    </div>
+    """, unsafe_allow_html=True)
     
-    # Hent dagens anbefalinger
-    from datetime import date
     today_str = date.today().isoformat()
     todays_recs = list_recommendations(date_from=today_str, date_to=today_str, status='open')
     
-    if not todays_recs:
-        st.warning("⚠️ Ingen bets for i dag. Trykk '🔄 Hent Odds' for å hente nye anbefalinger.")
+    # Finn alle unike parlay_ids
+    parlay_ids = set()
+    for r in todays_recs:
+        if r.get('parlay_id'):
+            parlay_ids.add(r['parlay_id'])
+    
+    if parlay_ids:
+        # Vis parlays
+        for parlay_id in sorted(parlay_ids):
+            render_parlay_card(parlay_id, None, todays_recs)
     else:
-        # Finn top bet (høyest edge)
-        top_bet = max(todays_recs, key=lambda x: x.get('edge_pct', 0))
-        
-        # Vis top bet banner
-        st.markdown(f"""
-        <div class="top-bet-banner">
-            <div class="top-bet-title">⭐ TOPP BET IDAG</div>
-            <div class="top-bet-match">{top_bet['match']}</div>
-            <div class="top-bet-details">
-                {format_market(top_bet['market'], top_bet['selection'])} @ {top_bet['odds']:.2f}x | 
-                Edge: {top_bet['edge_pct']:.1f}% | 
-                Stake: {top_bet['recommended_stake']:.0f} NOK
-            </div>
+        st.markdown("""
+        <div class="no-bets">
+            <div style="font-size: 2rem; margin-bottom: 1rem;">🎯</div>
+            <div style="font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem;">Ingen parlays for i dag</div>
+            <div>Trykk "🔄 Hent Odds" for å generere nye parlays</div>
         </div>
         """, unsafe_allow_html=True)
-        
-        # Kategoriser etter odds
-        categories = categorize_by_odds(todays_recs)
-        
-        # Vis kategorier
-        col_left, col_right = st.columns(2)
-        
-        with col_left:
-            render_odds_category("🔒 Sikre Bets (1.5-3.0x)", "🛡️", categories['low'], "#22c55e")
-            render_odds_category("🎯 Value Bets (10-50x)", "💎", categories['high'], "#8b5cf6")
-        
-        with col_right:
-            render_odds_category("⚖️ Balansert (3-10x)", "⚡", categories['medium'], "#6366f1")
-            render_odds_category("🚀 Longshots (50x+)", "🌟", categories['extreme'], "#f59e0b")
     
-    st.markdown("---")
+    # ── DAGENS SINGLE BETS ─────────────────────────────────────────────────
+    st.markdown("""
+    <div class="section-header">
+        <div class="section-title">⚡ DAGENS SINGLE BETS</div>
+        <div class="section-subtitle">Enkeltbets for de som foretrekker lavere risiko</div>
+    </div>
+    """, unsafe_allow_html=True)
     
-    # ── SISTE RESULTATER ─────────────────────────────────────────────────────
-    st.header("🎯 Siste Resultater")
+    singles = [r for r in todays_recs if not r.get('parlay_id')]
+    
+    if singles:
+        # Sorter etter edge
+        singles = sorted(singles, key=lambda x: x.get('edge_pct', 0), reverse=True)
+        
+        # Vis topp 5 singles
+        for bet in singles[:5]:
+            render_bet_card(bet)
+        
+        if len(singles) > 5:
+            st.caption(f"... og {len(singles) - 5} flere single bets")
+    else:
+        st.markdown("""
+        <div class="no-bets">
+            <div style="font-size: 2rem; margin-bottom: 1rem;">⚡</div>
+            <div style="font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem;">Ingen single bets for i dag</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # ── SISTE RESULTATER ────────────────────────────────────────────────────
+    st.markdown("""
+    <div class="section-header">
+        <div class="section-title">📋 SISTE RESULTATER</div>
+        <div class="section-subtitle">Siste settled bets</div>
+    </div>
+    """, unsafe_allow_html=True)
     
     recent_results = get_recent_results(limit=5)
     
