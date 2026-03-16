@@ -2,7 +2,7 @@ import streamlit as st
 import sys
 import os
 import subprocess
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 if _ROOT not in sys.path:
@@ -295,36 +295,43 @@ def format_bet_description(market, selection, home_team, away_team):
     """
     Formater bet-beskrivelse TYDELIG så bruker forstår nøyaktig hva som skal bettes.
     """
+    sel = str(selection).strip()
+    
     if market == 'h2h':
-        if selection == home_team:
+        if sel == home_team:
             return f"🏠 Hjemmeseier: {home_team} slår {away_team}"
-        elif selection == away_team:
+        elif sel == away_team:
             return f"✈️ Borteseier: {away_team} slår {home_team}"
-        elif selection.lower() in ['draw', 'uavgjort']:
+        elif sel.lower() in ['draw', 'uavgjort']:
             return f"🤝 Uavgjort mellom {home_team} og {away_team}"
         else:
-            return f"🏆 Vinner: {selection}"
+            return f"🏆 Vinner: {sel}"
     
     elif market == 'totals':
-        # "Over 2.5" eller "Under 2.5"
-        if 'over' in selection.lower():
-            line = selection.split()[-1]
-            return f"⬆️ Over {line} mål totalt (mer enn {line} mål i kampen)"
-        elif 'under' in selection.lower():
-            line = selection.split()[-1]
-            return f"⬇️ Under {line} mål totalt (færre enn {line} mål i kampen)"
-        return selection
+        # Parse "Over 2.5" eller "Under 2.5"
+        parts = sel.split()
+        if len(parts) >= 2:
+            direction = parts[0]  # "Over" eller "Under"
+            line = parts[-1]      # "2.5"
+            if direction.lower() == 'over':
+                return f"⬆️ Over {line} mål totalt"
+            elif direction.lower() == 'under':
+                return f"⬇️ Under {line} mål totalt"
+        return sel
     
     elif market == 'btts':
-        if selection.lower() in ['yes', 'ja']:
-            return f"⚽ Begge lag scorer minst ett mål"
+        if sel.lower() in ['yes', 'ja', 'both']:
+            return f"⚽ Begge lag scorer (BTTS Yes)"
         else:
-            return f"🚫 Ikke begge lag scorer"
+            return f"🚫 Ikke begge lag scorer (BTTS No)"
     
     elif market == 'h2h_lay':
-        return f"❌ {selection} vinner IKKE (lay bet)"
+        return f"❌ {sel} vinner IKKE (lay)"
     
-    return f"{market}: {selection}"
+    elif market == 'asian_handicap':
+        return f"🏁 Asian Handicap: {sel}"
+    
+    return f"{market}: {sel}"
 
 
 def parse_match_teams(match_str):
@@ -578,7 +585,67 @@ def render():
         <div class="no-bets">
             <div style="font-size: 2rem; margin-bottom: 1rem;">🎯</div>
             <div style="font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem;">Ingen parlays for i dag</div>
-            <div>Trykk "🔄 Hent Odds" for å generere nye parlays</div>
+            <div>Sjekk 🗓️ UKENS PARLAYS under for kommende kamper</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # ── UKENS PARLAYS ───────────────────────────────────────────────────────
+    st.markdown("""
+    <div class="section-header">
+        <div class="section-title">🗓️ UKENS PARLAYS</div>
+        <div class="section-subtitle">Alle parlays for kommende uke (mandag-søndag)</div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Beregn ukens datoer (mandag til søndag)
+    today = date.today()
+    monday = today - timedelta(days=today.weekday())  # Mandag denne uken
+    sunday = monday + timedelta(days=6)  # Søndag denne uken
+    
+    weekly_recs = list_recommendations(date_from=monday.isoformat(), date_to=sunday.isoformat(), status='open')
+    
+    # Finn alle unike parlay_ids for uken
+    weekly_parlay_ids = set()
+    for r in weekly_recs:
+        if r.get('parlay_id'):
+            weekly_parlay_ids.add(r['parlay_id'])
+    
+    # Grupper parlays etter dato
+    parlays_by_date = {}
+    for pid in weekly_parlay_ids:
+        parlay_recs = [r for r in weekly_recs if r.get('parlay_id') == pid]
+        if parlay_recs:
+            # Bruk første recs dato som parlay dato
+            pdate = parlay_recs[0].get('date', today.isoformat())
+            if pdate not in parlays_by_date:
+                parlays_by_date[pdate] = []
+            parlays_by_date[pdate].append(pid)
+    
+    if weekly_parlay_ids:
+        # Vis parlays gruppert etter dato
+        for pdate in sorted(parlays_by_date.keys()):
+            date_obj = datetime.strptime(pdate, '%Y-%m-%d').date()
+            day_name = ['Mandag', 'Tirsdag', 'Onsdag', 'Torsdag', 'Fredag', 'Lørdag', 'Søndag'][date_obj.weekday()]
+            
+            # Marker dagens dato
+            is_today = (pdate == today_str)
+            highlight = "🟢 " if is_today else ""
+            
+            st.markdown(f"""
+            <div style="margin: 1.5rem 0 0.75rem 0; padding: 0.5rem 0; border-bottom: 1px solid #6366f144;">
+                <strong style="color: #6366f1; font-size: 1.1rem;">{highlight}{day_name} {pdate}</strong>
+                {"<span style='background: #22c55e; color: white; padding: 2px 8px; border-radius: 10px; font-size: 0.75rem; margin-left: 8px;'>I DAG</span>" if is_today else ""}
+            </div>
+            """, unsafe_allow_html=True)
+            
+            for parlay_id in parlays_by_date[pdate]:
+                render_parlay_card(parlay_id, None, weekly_recs)
+    else:
+        st.markdown("""
+        <div class="no-bets">
+            <div style="font-size: 2rem; margin-bottom: 1rem;">📅</div>
+            <div style="font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem;">Ingen parlays for ukene</div>
+            <div>Trykk "🔄 Hent Odds" for å hente kommende kamper</div>
         </div>
         """, unsafe_allow_html=True)
     
