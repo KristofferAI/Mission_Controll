@@ -299,28 +299,28 @@ def format_bet_description(market, selection, home_team, away_team):
     
     if market == 'h2h':
         if sel == home_team:
-            return f"🏠 Hjemmeseier: {home_team} slår {away_team} (1X2 - Hjemme)"
+            return f"🏠 Hjemmeseier: {home_team} slår {away_team}"
         elif sel == away_team:
-            return f"✈️ Borteseier: {away_team} slår {home_team} (1X2 - Borte)"
+            return f"✈️ Borteseier: {away_team} slår {home_team}"
         elif sel.lower() in ['draw', 'uavgjort']:
-            return f"🤝 Uavgjort mellom {home_team} og {away_team} (1X2 - Uavgjort)"
+            return f"🤝 Uavgjort mellom {home_team} og {away_team}"
         else:
             return f"🏆 Vinner: {sel}"
     
     elif market == 'totals':
-        # Parse "Over 2.5" eller "Under 2.5"
+        # Sjekk om selection allerede inneholder linje (f.eks. "Over 2.5")
         parts = sel.split()
         if len(parts) >= 2:
             direction = parts[0]  # "Over" eller "Under"
             line = parts[-1]      # "2.5"
             if direction.lower() == 'over':
-                return f"⬆️ Over {line} mål totalt i kampen (mer enn {line} mål)"
+                return f"⬆️ Over {line} mål totalt"
             elif direction.lower() == 'under':
-                return f"⬇️ Under {line} mål totalt i kampen (færre enn {line} mål)"
-        return sel
+                return f"⬇️ Under {line} mål totalt"
+        # Gamle data uten linje - vis tydelig at det mangler
+        return f"⚠️ {sel} mål-linje (data mangler - sjekk bet365 for korrekt linje)"
     
     elif market == 'team_totals':
-        # Format: "Chelsea Over 1.5" eller "Chelsea Under 1.5"
         parts = sel.split()
         if len(parts) >= 3:
             team = parts[0]
@@ -334,15 +334,12 @@ def format_bet_description(market, selection, home_team, away_team):
     
     elif market == 'btts':
         if sel.lower() in ['yes', 'ja', 'both']:
-            return f"⚽ Begge lag scorer (BTTS Yes)"
+            return f"⚽ Begge lag scorer"
         else:
-            return f"🚫 Ikke begge lag scorer (BTTS No)"
+            return f"🚫 Ikke begge lag scorer"
     
     elif market == 'h2h_lay':
-        return f"❌ {sel} vinner IKKE (lay bet)"
-    
-    elif market == 'asian_handicap':
-        return f"🏁 Asian Handicap: {sel}"
+        return f"❌ {sel} vinner IKKE"
     
     return f"{market}: {sel}"
 

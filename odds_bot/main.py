@@ -275,13 +275,19 @@ def get_best_bets_per_fixture(event: Dict, league: str) -> Optional[Dict]:
     commence = event['commence_time']
 
     markets = {}
+    market_points = {}  # Lagre point (linje) for hver outcome
     for bk in event.get('bookmakers', []):
         for m in bk.get('markets', []):
             if m['key'] == 'h2h_lay':
                 continue
             for o in m.get('outcomes', []):
+                key = o['name']
+                # For totals, inkluder point i nøkkelen
+                if m['key'] == 'totals' and o.get('point'):
+                    key = f"{o['name']} {o['point']}"
+                    market_points[key] = o['point']
                 markets.setdefault(m['key'], {}).setdefault(
-                    o['name'], []).append(float(o['price']))
+                    key, []).append(float(o['price']))
 
     best_bet = None
     best_ev = -999
