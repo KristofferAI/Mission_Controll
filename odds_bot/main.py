@@ -457,6 +457,15 @@ def place_bet_auto(bet: Dict, stake: float, bet_type: str = 'single', parlay_id:
         logger.info(f"Edge for lav ({bet['edge_pct']:.1f}% < {MIN_EDGE_FOR_AUTO}%), skipper auto-place")
         return False
     
+    # Trekke stake fra bankroll (paper trading)
+    from src.db import get_balance, set_balance
+    balance = get_balance()
+    if balance < stake:
+        logger.warning(f"Ikke nok bankroll ({balance:.0f} < {stake:.0f}), skipper bet")
+        return False
+    set_balance(balance - stake)
+    logger.info(f"Stake {stake:.0f} NOK trukket fra bankroll. Gjenstår: {balance - stake:.0f} NOK")
+    
     # Legg til i database
     rec_id = add_recommendation(
         date=today_str,
@@ -471,6 +480,7 @@ def place_bet_auto(bet: Dict, stake: float, bet_type: str = 'single', parlay_id:
         recommended_stake=stake,
         bet_type=bet_type,
         parlay_id=parlay_id,
+        commence_time=bet.get('commence_time'),
     )
     
     # Logg handlingen
@@ -478,7 +488,7 @@ def place_bet_auto(bet: Dict, stake: float, bet_type: str = 'single', parlay_id:
     log_betting_action(
         recommendation_id=rec_id,
         action=action,
-        details=f"Stake: {stake:.0f} NOK, Edge: {bet['edge_pct']:.1f}%, Paper: {PAPER_MODE}"
+        details=f"Stake: {stake:.0f} NOK trukket, Bankroll: {balance - stake:.0f} NOK, Edge: {bet['edge_pct']:.1f}%"
     )
     
     # Send varsel
@@ -553,6 +563,7 @@ def run_pipeline(auto_place: bool = None):
                     recommended_stake=stake,
                     bet_type='parlay',
                     parlay_id=p['parlay_id'],
+                    commence_time=leg.get('commence_time'),
                 )
 
     # Plasser SINGLE BETS (sekundært - kun maks 3)
@@ -592,6 +603,7 @@ def run_pipeline(auto_place: bool = None):
                 recommended_stake=stake,
                 bet_type='single',
                 parlay_id=None,
+                commence_time=bet.get('commence_time'),
             )
 
     total_placed = singles_placed + parlay_placed_count

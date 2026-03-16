@@ -126,7 +126,8 @@ def init_db():
             status              TEXT DEFAULT 'open',
             actual_result       TEXT DEFAULT '',
             pnl                 REAL DEFAULT 0.0,
-            created_at          TEXT
+            created_at          TEXT,
+            commence_time       TEXT
         )
     """)
     
@@ -593,18 +594,18 @@ def list_learning_log(bot_id=None, limit: int = 50) -> list:
 # ── Recommendations ──────────────────────────────────────────────────────────
 def add_recommendation(date, match, league, market, selection, odds, true_probability,
                        implied_probability, edge_pct, recommended_stake,
-                       bet_type='single', parlay_id=None) -> int:
+                       bet_type='single', parlay_id=None, commence_time=None) -> int:
     """Insert a recommendation and return its id."""
     conn = get_conn()
     cur = conn.execute(
         """INSERT INTO recommendations
            (date, match, league, market, selection, odds, true_probability,
             implied_probability, edge_pct, recommended_stake, bet_type, parlay_id,
-            status, actual_result, pnl, created_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'open','',0.0,?)""",
+            status, actual_result, pnl, created_at, commence_time)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'open','',0.0,?,?)""",
         (date, match, league, market, selection, odds, true_probability,
          implied_probability, edge_pct, recommended_stake, bet_type, parlay_id,
-         datetime.utcnow().isoformat()),
+         datetime.utcnow().isoformat(), commence_time),
     )
     rec_id = cur.lastrowid
     conn.commit()

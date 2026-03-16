@@ -293,17 +293,17 @@ st.markdown("""
 
 def format_bet_description(market, selection, home_team, away_team):
     """
-    Formater bet-beskrivelse TYDELIG så bruker forstår nøyaktig hva som skal bettes.
+    Formater bet-beskrivelse TYDELIG med nøyaktig hva som skal bettes.
     """
     sel = str(selection).strip()
     
     if market == 'h2h':
         if sel == home_team:
-            return f"🏠 Hjemmeseier: {home_team} slår {away_team}"
+            return f"🏠 Hjemmeseier: {home_team} slår {away_team} (1X2 - Hjemme)"
         elif sel == away_team:
-            return f"✈️ Borteseier: {away_team} slår {home_team}"
+            return f"✈️ Borteseier: {away_team} slår {home_team} (1X2 - Borte)"
         elif sel.lower() in ['draw', 'uavgjort']:
-            return f"🤝 Uavgjort mellom {home_team} og {away_team}"
+            return f"🤝 Uavgjort mellom {home_team} og {away_team} (1X2 - Uavgjort)"
         else:
             return f"🏆 Vinner: {sel}"
     
@@ -314,9 +314,22 @@ def format_bet_description(market, selection, home_team, away_team):
             direction = parts[0]  # "Over" eller "Under"
             line = parts[-1]      # "2.5"
             if direction.lower() == 'over':
-                return f"⬆️ Over {line} mål totalt"
+                return f"⬆️ Over {line} mål totalt i kampen (mer enn {line} mål)"
             elif direction.lower() == 'under':
-                return f"⬇️ Under {line} mål totalt"
+                return f"⬇️ Under {line} mål totalt i kampen (færre enn {line} mål)"
+        return sel
+    
+    elif market == 'team_totals':
+        # Format: "Chelsea Over 1.5" eller "Chelsea Under 1.5"
+        parts = sel.split()
+        if len(parts) >= 3:
+            team = parts[0]
+            direction = parts[1]
+            line = parts[2]
+            if direction.lower() == 'over':
+                return f"⚽ {team} scorer over {line} mål"
+            else:
+                return f"🛡️ {team} scorer under {line} mål"
         return sel
     
     elif market == 'btts':
@@ -326,7 +339,7 @@ def format_bet_description(market, selection, home_team, away_team):
             return f"🚫 Ikke begge lag scorer (BTTS No)"
     
     elif market == 'h2h_lay':
-        return f"❌ {sel} vinner IKKE (lay)"
+        return f"❌ {sel} vinner IKKE (lay bet)"
     
     elif market == 'asian_handicap':
         return f"🏁 Asian Handicap: {sel}"
@@ -342,6 +355,27 @@ def parse_match_teams(match_str):
     return match_str, ""
 
 
+def format_datetime(dt_str):
+    """Formater datetime string til lesbart format."""
+    if not dt_str:
+        return "Ukjent tid"
+    try:
+        # Håndter ISO format
+        if 'T' in dt_str:
+            dt = datetime.fromisoformat(dt_str.replace('Z', '+00:00'))
+        else:
+            dt = datetime.strptime(dt_str, '%Y-%m-%d %H:%M:%S')
+        # Konverter til lokal tid
+        now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
+        if not dt.tzinfo:
+            dt = dt.replace(tzinfo=now.astimezone().tzinfo)
+        day_names = ['Man', 'Tirs', 'Ons', 'Tors', 'Fre', 'Lør', 'Søn']
+        day_name = day_names[dt.weekday()]
+        return f"{day_name} {dt.strftime('%d.%m %H:%M')}"
+    except:
+        return dt_str[:16] if len(dt_str) > 16 else dt_str
+
+
 def render_bet_card(bet, is_parlay_leg=False):
     """Render en bet card med TYDELIG beskrivelse."""
     home, away = parse_match_teams(bet['match'])
@@ -353,12 +387,15 @@ def render_bet_card(bet, is_parlay_leg=False):
     
     card_class = "parlay-leg" if is_parlay_leg else "bet-card"
     
+    # Formater kampdato
+    commence = format_datetime(bet.get('commence_time'))
+    
     st.markdown(f"""
     <div class="{card_class}">
         <div class="bet-header">
             <div>
                 <div class="bet-match">{bet['match']}</div>
-                <div class="bet-league">{bet['league']}</div>
+                <div class="bet-league">🏆 {bet['league']} · 🕐 {commence}</div>
             </div>
             <div class="bet-odds">{bet['odds']:.2f}x</div>
         </div>
@@ -413,11 +450,12 @@ def render_parlay_card(parlay_id, legs, all_recs):
     for leg in parlay_recs:
         home, away = parse_match_teams(leg['match'])
         description = format_bet_description(leg['market'], leg['selection'], home, away)
+        commence = format_datetime(leg.get('commence_time'))
         
         st.markdown(f"""
         <div class="parlay-leg">
             <div class="parlay-leg-match">{leg['match']}</div>
-            <div class="parlay-leg-league">{leg['league']}</div>
+            <div class="parlay-leg-league">🏆 {leg['league']} · 🕐 {commence}</div>
             <div class="parlay-leg-bet">{description} @ {leg['odds']:.2f}x</div>
         </div>
         """, unsafe_allow_html=True)
