@@ -152,8 +152,8 @@ def render():
                 plot_bgcolor='rgba(0,0,0,0)',
                 paper_bgcolor='rgba(0,0,0,0)',
                 font=dict(color='#f1f5f9'),
-                xaxis=dict(gridcolor='#6366f122', tickangle=-45),
-                yaxis=dict(gridcolor='#6366f122', title='PnL (NOK)'),
+                xaxis=dict(gridcolor='rgba(99,102,241,0.13)', tickangle=-45),
+                yaxis=dict(gridcolor='rgba(99,102,241,0.13)', title='PnL (NOK)'),
                 showlegend=False,
                 margin=dict(b=100),
             )
