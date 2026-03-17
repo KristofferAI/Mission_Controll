@@ -20,6 +20,19 @@ if _ROOT not in sys.path:
 
 load_dotenv(os.path.join(_ROOT, '.env'))
 
+# Import API modules
+try:
+    from odds_bot.api_football import fetch_odds_api_football, LEAGUES as API_LEAGUES
+    API_FOOTBALL_AVAILABLE = True
+except ImportError:
+    API_FOOTBALL_AVAILABLE = False
+
+try:
+    from odds_bot.mock_data import fetch_mock_odds
+    MOCK_DATA_AVAILABLE = True
+except ImportError:
+    MOCK_DATA_AVAILABLE = False
+
 # ── Logging konfigurasjon ───────────────────────────────────────────────────
 log_dir = os.path.join(_ROOT, 'data')
 os.makedirs(log_dir, exist_ok=True)
@@ -223,25 +236,45 @@ def notify_daily_summary():
 
 
 # ── Odds API ────────────────────────────────────────────────────────────────
+# Map sport keys to league names for new API
+SPORT_TO_LEAGUE = {
+    'soccer_epl': 'Premier League',
+    'soccer_uefa_champs_league': 'Champions League',
+    'soccer_uefa_europa_league': 'Europa League',
+    'soccer_spain_la_liga': 'La Liga',
+    'soccer_germany_bundesliga': 'Bundesliga',
+    'soccer_italy_serie_a': 'Serie A',
+    'soccer_france_ligue_one': 'Ligue 1',
+    'soccer_netherlands_eredivisie': 'Eredivisie',
+}
+
+# USE_MOCK_DATA = True  # Sett til False for å bruke ekte API
+USE_MOCK_DATA = os.getenv('USE_MOCK_DATA', 'true').lower() == 'true'
+
 def fetch_odds(sport: str) -> List[Dict]:
-    """Hent odds for en sport fra The Odds API."""
-    try:
-        resp = requests.get(
-            f"{BASE_URL}/sports/{sport}/odds/",
-            params={'apiKey': ODDS_API_KEY, 'regions': 'eu',
-                    'markets': 'h2h,totals', 'oddsFormat': 'decimal'},
-            timeout=15
-        )
-        resp.raise_for_status()
-        now = datetime.now(timezone.utc)
-        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        future = [e for e in resp.json()
-                  if datetime.fromisoformat(e['commence_time'].replace('Z', '+00:00')) >= today_start]
-        logger.info(f"{SPORT_LABELS.get(sport, sport)}: {len(future)} kamper")
-        return future
-    except Exception as e:
-        logger.warning(f"Feil ved henting av {sport}: {e}")
+    """
+    Hent odds for en sport.
+    Bruker mock-data som default for å spare API-kall.
+    """
+    league_name = SPORT_TO_LEAGUE.get(sport)
+    if not league_name:
+        logger.warning(f"Ukjent sport: {sport}")
         return []
+    
+    # Use mock data by default to save API requests
+    if USE_MOCK_DATA and MOCK_DATA_AVAILABLE:
+        logger.info(f"📊 Bruker mock-data for {league_name}")
+        from odds_bot.mock_data import fetch_mock_odds
+        return fetch_mock_odds(league_name)
+    
+    # Try real API if mock is disabled
+    if API_FOOTBALL_AVAILABLE:
+        logger.info(f"🌐 Henter ekte odds for {league_name}")
+        from odds_bot.api_football import fetch_odds_api_football
+        return fetch_odds_api_football(league_name)
+    
+    logger.warning(f"Ingen datakilde tilgjengelig for {sport}")
+    return []
 
 
 def remove_margin(outcome_odds: Dict[str, List[float]]) -> Dict[str, float]:
