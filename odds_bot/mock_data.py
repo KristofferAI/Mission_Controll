@@ -1,43 +1,41 @@
 """
-Mock odds data for testing when API quota is exhausted or no fixtures available.
+Mock odds data for testing - Format compatible with main_v2.py
 """
 import random
 from datetime import datetime, timedelta
 
-# Mock data for testing
 MOCK_LEAGUES = {
-    'Champions League': [
-        ('Real Madrid', 'Manchester City'),
-        ('Bayern Munich', 'Arsenal'),
-        ('Barcelona', 'PSG'),
-        ('Inter Milan', 'Atletico Madrid'),
-    ],
     'Premier League': [
         ('Liverpool', 'Manchester United'),
         ('Arsenal', 'Chelsea'),
         ('Manchester City', 'Tottenham'),
         ('Aston Villa', 'Newcastle'),
     ],
+    'Champions League': [
+        ('Real Madrid', 'Manchester City'),
+        ('Bayern Munich', 'Arsenal'),
+        ('Barcelona', 'PSG'),
+        ('Inter Milan', 'Atletico Madrid'),
+    ],
     'La Liga': [
         ('Real Madrid', 'Barcelona'),
         ('Atletico Madrid', 'Sevilla'),
-        ('Real Sociedad', 'Athletic Bilbao'),
     ],
     'Bundesliga': [
         ('Bayern Munich', 'Borussia Dortmund'),
         ('Bayer Leverkusen', 'RB Leipzig'),
-        ('Eintracht Frankfurt', 'Wolfsburg'),
     ],
     'Serie A': [
         ('Inter Milan', 'Juventus'),
         ('AC Milan', 'Napoli'),
-        ('Roma', 'Lazio'),
     ],
 }
 
+BOOKMAKERS = ['bet365', 'unibet', 'pinnacle', 'williamhill']
 
-def generate_mock_odds(league_name: str, days: int = 7):
-    """Generer mock odds data for testing."""
+
+def fetch_mock_odds(league_name: str, days: int = 7):
+    """Generer mock odds i formatet main_v2.py forventer."""
     teams = MOCK_LEAGUES.get(league_name, [])
     if not teams:
         return []
@@ -46,89 +44,85 @@ def generate_mock_odds(league_name: str, days: int = 7):
     base_time = datetime.now()
     
     for i, (home, away) in enumerate(teams):
-        # Generate future match time
-        match_time = base_time + timedelta(days=i, hours=(i * 2) % 24)
+        match_time = base_time + timedelta(days=i, hours=(i * 3) % 24)
+        fixture_id = f"mock_{league_name.replace(' ', '_')}_{i}"
         
-        # Generate realistic odds
-        home_win_odds = round(random.uniform(1.8, 3.5), 2)
-        draw_odds = round(random.uniform(3.0, 4.0), 2)
-        away_win_odds = round(random.uniform(2.0, 4.5), 2)
+        # Generate realistic probabilities
+        home_strength = random.uniform(0.4, 0.7)
+        away_strength = random.uniform(0.3, 0.6)
+        draw_prob = 0.25
+        total = home_strength + away_strength + 0.5
+        home_prob = home_strength / total * (1 - draw_prob)
+        away_prob = (1 - draw_prob) - home_prob
         
-        # Totals odds
-        over_25_odds = round(random.uniform(1.7, 2.2), 2)
-        under_25_odds = round(random.uniform(1.7, 2.1), 2)
+        # Calculate true odds
+        true_odds = {
+            home: round(1.0 / home_prob, 2),
+            away: round(1.0 / away_prob, 2),
+            'Draw': round(1.0 / draw_prob, 2)
+        }
         
-        match = {
-            'id': f'mock_{league_name.replace(" ", "_")}_{i}',
+        # Generate bookmaker odds with variance
+        bookmakers = []
+        for bk in BOOKMAKERS:
+            bk_odds = []
+            for outcome, odds in true_odds.items():
+                # Add margin and variance
+                margin = random.uniform(0.03, 0.07)
+                variance = random.uniform(0.95, 1.08)  # Create value opportunities
+                final_odds = round(odds * variance / (1 + margin), 2)
+                bk_odds.append({'name': outcome, 'price': final_odds})
+            
+            bookmakers.append({
+                'key': bk,
+                'title': bk.title(),
+                'markets': [{
+                    'key': 'h2h',
+                    'outcomes': bk_odds
+                }]
+            })
+        
+        # Add totals market
+        line = 2.5
+        over_prob = random.uniform(0.45, 0.55)
+        under_prob = 1 - over_prob
+        
+        for bk in BOOKMAKERS[:2]:  # Add to first 2 bookies
+            over_odds = round((1.0 / over_prob) * random.uniform(0.95, 1.1), 2)
+            under_odds = round((1.0 / under_prob) * random.uniform(0.95, 1.1), 2)
+            
+            for bookie in bookmakers:
+                if bookie['key'] == bk:
+                    bookie['markets'].append({
+                        'key': 'totals',
+                        'outcomes': [
+                            {'name': 'Over', 'point': line, 'price': over_odds},
+                            {'name': 'Under', 'point': line, 'price': under_odds}
+                        ]
+                    })
+                    break
+        
+        matches.append({
+            'id': fixture_id,
             'home_team': home,
             'away_team': away,
             'commence_time': match_time.isoformat() + 'Z',
             'league': league_name,
-            'bookmakers': [
-                {
-                    'key': 'bet365',
-                    'title': 'Bet365',
-                    'markets': [
-                        {
-                            'key': 'h2h',
-                            'outcomes': [
-                                {'name': home, 'price': home_win_odds},
-                                {'name': 'Draw', 'price': draw_odds},
-                                {'name': away, 'price': away_win_odds},
-                            ]
-                        },
-                        {
-                            'key': 'totals',
-                            'outcomes': [
-                                {'name': 'Over', 'point': 2.5, 'price': over_25_odds},
-                                {'name': 'Under', 'point': 2.5, 'price': under_25_odds},
-                            ]
-                        }
-                    ]
-                },
-                {
-                    'key': 'unibet',
-                    'title': 'Unibet',
-                    'markets': [
-                        {
-                            'key': 'h2h',
-                            'outcomes': [
-                                {'name': home, 'price': round(home_win_odds * random.uniform(0.95, 1.05), 2)},
-                                {'name': 'Draw', 'price': draw_odds},
-                                {'name': away, 'price': round(away_win_odds * random.uniform(0.95, 1.05), 2)},
-                            ]
-                        },
-                        {
-                            'key': 'totals',
-                            'outcomes': [
-                                {'name': 'Over', 'point': 2.5, 'price': round(over_25_odds * random.uniform(0.95, 1.05), 2)},
-                                {'name': 'Under', 'point': 2.5, 'price': round(under_25_odds * random.uniform(0.95, 1.05), 2)},
-                            ]
-                        }
-                    ]
-                }
-            ]
-        }
-        matches.append(match)
+            'bookmakers': bookmakers
+        })
     
     return matches
-
-
-def fetch_mock_odds(league_name: str, days: int = 7):
-    """Wrapper for mock odds - same interface as real API."""
-    print(f"📊 Mock data aktivert for {league_name}")
-    return generate_mock_odds(league_name, days)
 
 
 if __name__ == '__main__':
     # Test
     print("Testing mock data...")
-    for league in ['Champions League', 'Premier League']:
-        odds = generate_mock_odds(league)
-        print(f"{league}: {len(odds)} kamper")
+    for league in ['Premier League', 'Champions League']:
+        odds = fetch_mock_odds(league)
+        print(f"\n{league}: {len(odds)} kamper")
         if odds:
-            print(f"  {odds[0]['home_team']} vs {odds[0]['away_team']}")
-            print(f"  Time: {odds[0]['commence_time']}")
-            for bk in odds[0]['bookmakers'][:1]:
-                for m in bk['markets'][:2]:
-                    print(f"    {m['key']}: {[o['name'] for o in m['outcomes']]}")
+            match = odds[0]
+            print(f"  {match['home_team']} vs {match['away_team']}")
+            for bk in match['bookmakers'][:2]:
+                outcomes = ', '.join([f"{o['name']}@{o['price']}" for o in bk['markets'][0]['outcomes'][:3]])
+                print(f"    {bk['title']}: {outcomes}")
