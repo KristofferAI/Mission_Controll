@@ -323,11 +323,12 @@ def render_hero(balance: float, summary: dict):
     with col2:
         win_rate = summary['win_rate']
         wr_class = 'positive' if win_rate >= 50 else 'negative'
+        loss_count = summary.get('loss_count', summary.get('total_count', 0) - summary.get('win_count', 0))
         st.markdown(f"""
         <div class="metric-card">
             <div class="metric-label">Win Rate</div>
             <div class="metric-value" style="color: {'#22c55e' if win_rate >= 50 else '#ef4444'};">{win_rate:.1f}%</div>
-            <div class="metric-change">{summary['win_count']}W / {summary['loss_count']}L</div>
+            <div class="metric-change">{summary.get('win_count', 0)}W / {loss_count}L</div>
         </div>
         """, unsafe_allow_html=True)
     

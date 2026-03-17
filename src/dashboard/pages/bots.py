@@ -160,9 +160,10 @@ def render():
         """, unsafe_allow_html=True)
     
     with col4:
+        loss_count = summary.get('loss_count', summary.get('total_count', 0) - summary.get('win_count', 0))
         st.markdown(f"""
         <div class="metric-card">
-            <div class="metric-value" style="color: #ef4444;">{summary['loss_count']}</div>
+            <div class="metric-value" style="color: #ef4444;">{loss_count}</div>
             <div class="metric-label">Tap</div>
         </div>
         """, unsafe_allow_html=True)
