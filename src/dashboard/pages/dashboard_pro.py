@@ -410,36 +410,42 @@ def render_performance_chart(results: list):
 
 
 def render_bet_card(bet: dict):
-    """Render en bet card."""
+    """Render en bet card med defensive fallbacks."""
     status = bet.get('status', 'open')
+    match = bet.get('match', 'Unknown Match')
+    league = bet.get('league', 'Unknown League')
+    odds = bet.get('odds', 1.0)
+    selection = bet.get('selection', 'Unknown')
+    edge = bet.get('edge_pct', 0)
+    stake = bet.get('recommended_stake', 50)
+    pnl_val = bet.get('pnl', 0)
     
     if status == 'won':
         badge = '<span class="badge badge-win">✓ WON</span>'
-        pnl = f"+{bet.get('pnl', 0):.0f}"
+        pnl = f"+{pnl_val:.0f}"
         pnl_color = '#22c55e'
     elif status == 'lost':
         badge = '<span class="badge badge-loss">✗ LOSS</span>'
-        pnl = f"{bet.get('pnl', 0):.0f}"
+        pnl = f"{pnl_val:.0f}"
         pnl_color = '#ef4444'
     else:
         badge = '<span class="badge badge-open">◉ OPEN</span>'
         pnl = "PENDING"
         pnl_color = '#f59e0b'
     
-    edge = bet.get('edge_pct', 0)
     edge_color = '#22c55e' if edge >= 5 else '#f59e0b' if edge >= 3 else '#ef4444'
     
     st.markdown(f"""
     <div class="bet-card">
         <div class="bet-header">
             <div>
-                <div class="bet-match">{bet['match']}</div>
-                <div class="bet-league">🏆 {bet['league']} · {badge}</div>
+                <div class="bet-match">{match}</div>
+                <div class="bet-league">🏆 {league} · {badge}</div>
             </div>
-            <div class="bet-odds">{bet['odds']:.2f}x</div>
+            <div class="bet-odds">{odds:.2f}x</div>
         </div>
         <div class="bet-body">
-            <div class="bet-selection">{bet['selection']}</div>
+            <div class="bet-selection">{selection}</div>
             <div class="bet-stats">
                 <div class="bet-stat">
                     <div class="bet-stat-label">Edge</div>
@@ -447,7 +453,7 @@ def render_bet_card(bet: dict):
                 </div>
                 <div class="bet-stat">
                     <div class="bet-stat-label">Stake</div>
-                    <div class="bet-stat-value">{bet.get('recommended_stake', 0):.0f} NOK</div>
+                    <div class="bet-stat-value">{stake:.0f} NOK</div>
                 </div>
                 <div class="bet-stat">
                     <div class="bet-stat-label">PnL</div>

@@ -749,7 +749,7 @@ def get_recent_results(limit: int = 5) -> list:
     """Hent siste X resultater."""
     conn = get_conn()
     rows = conn.execute(
-        """SELECT match, selection, status, pnl, actual_result, date, odds 
+        """SELECT match, league, selection, status, pnl, actual_result, date, odds, recommended_stake, edge_pct 
            FROM recommendations 
            WHERE status IN ('won', 'lost') 
            ORDER BY created_at DESC 
