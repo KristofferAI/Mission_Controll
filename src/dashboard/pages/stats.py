@@ -179,8 +179,8 @@ def render():
                 plot_bgcolor='rgba(0,0,0,0)',
                 paper_bgcolor='rgba(0,0,0,0)',
                 font=dict(color='#f1f5f9'),
-                xaxis=dict(gridcolor='#6366f122', tickangle=-45),
-                yaxis=dict(gridcolor='#6366f122', title='Win Rate %', range=[0, 100]),
+                xaxis=dict(gridcolor='rgba(99,102,241,0.13)', tickangle=-45),
+                yaxis=dict(gridcolor='rgba(99,102,241,0.13)', title='Win Rate %', range=[0, 100]),
                 showlegend=False,
                 margin=dict(b=100),
             )
@@ -262,8 +262,8 @@ def render():
                 plot_bgcolor='rgba(0,0,0,0)',
                 paper_bgcolor='rgba(0,0,0,0)',
                 font=dict(color='#f1f5f9'),
-                xaxis=dict(gridcolor='#6366f122'),
-                yaxis=dict(gridcolor='#6366f122', title='Antall Bets'),
+                xaxis=dict(gridcolor='rgba(99,102,241,0.13)'),
+                yaxis=dict(gridcolor='rgba(99,102,241,0.13)', title='Antall Bets'),
                 showlegend=False,
             )
             
@@ -320,8 +320,8 @@ def render():
             plot_bgcolor='rgba(0,0,0,0)',
             paper_bgcolor='rgba(0,0,0,0)',
             font=dict(color='#f1f5f9'),
-            xaxis=dict(gridcolor='#6366f122', title='Time på døgnet'),
-            yaxis=dict(gridcolor='#6366f122', title='Ukedag'),
+            xaxis=dict(gridcolor='rgba(99,102,241,0.13)', title='Time på døgnet'),
+            yaxis=dict(gridcolor='rgba(99,102,241,0.13)', title='Ukedag'),
             height=400,
         )
         
@@ -344,8 +344,8 @@ def render():
             plot_bgcolor='rgba(0,0,0,0)',
             paper_bgcolor='rgba(0,0,0,0)',
             font=dict(color='#f1f5f9'),
-            xaxis=dict(gridcolor='#6366f122', title='Time på døgnet'),
-            yaxis=dict(gridcolor='#6366f122', title='Ukedag'),
+            xaxis=dict(gridcolor='rgba(99,102,241,0.13)', title='Time på døgnet'),
+            yaxis=dict(gridcolor='rgba(99,102,241,0.13)', title='Ukedag'),
             height=400,
         )
         
@@ -461,8 +461,8 @@ def render():
                 plot_bgcolor='rgba(0,0,0,0)',
                 paper_bgcolor='rgba(0,0,0,0)',
                 font=dict(color='#f1f5f9'),
-                xaxis=dict(gridcolor='#6366f122', title='Forventet Edge %', range=[0, 8]),
-                yaxis=dict(gridcolor='#6366f122', title='Faktisk ROI %'),
+                xaxis=dict(gridcolor='rgba(99,102,241,0.13)', title='Forventet Edge %', range=[0, 8]),
+                yaxis=dict(gridcolor='rgba(99,102,241,0.13)', title='Faktisk ROI %'),
                 showlegend=False,
             )
             
