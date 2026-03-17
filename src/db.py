@@ -652,7 +652,7 @@ def settle_recommendation(rec_id: int, actual_result: str, won: bool):
 
 
 def get_recommendation_summary() -> dict:
-    """Return {total_staked, total_pnl, win_count, total_count, win_rate, roi_pct}"""
+    """Return {total_staked, total_pnl, win_count, loss_count, total_count, win_rate, roi_pct}"""
     conn = get_conn()
     rows = conn.execute(
         "SELECT recommended_stake, pnl, status FROM recommendations WHERE status IN ('won','lost')"
@@ -663,6 +663,7 @@ def get_recommendation_summary() -> dict:
             'total_staked': 0.0,
             'total_pnl': 0.0,
             'win_count': 0,
+            'loss_count': 0,
             'total_count': 0,
             'win_rate': 0.0,
             'roi_pct': 0.0,
@@ -670,6 +671,7 @@ def get_recommendation_summary() -> dict:
     total_staked = sum(r['recommended_stake'] for r in rows)
     total_pnl = sum(r['pnl'] for r in rows)
     win_count = sum(1 for r in rows if r['status'] == 'won')
+    loss_count = sum(1 for r in rows if r['status'] == 'lost')
     total_count = len(rows)
     win_rate = (win_count / total_count * 100) if total_count > 0 else 0.0
     roi_pct = (total_pnl / total_staked * 100) if total_staked > 0 else 0.0
@@ -677,6 +679,7 @@ def get_recommendation_summary() -> dict:
         'total_staked': total_staked,
         'total_pnl': total_pnl,
         'win_count': win_count,
+        'loss_count': loss_count,
         'total_count': total_count,
         'win_rate': win_rate,
         'roi_pct': roi_pct,
