@@ -143,6 +143,7 @@ PAGES = {
     "🏠  Dashboard":    "dashboard",
     "💰  Bets":         "bets",
     "📊  Statistikk":   "stats",
+    "🤖  Paper Bot":    "bots",
     "⚙️  Innstillinger": "settings",
 }
 
@@ -195,6 +196,8 @@ elif page_key == "bets":
     from src.dashboard.pages.bets import render
 elif page_key == "stats":
     from src.dashboard.pages.stats import render
+elif page_key == "bots":
+    from src.dashboard.pages.bots import render
 elif page_key == "settings":
     from src.dashboard.pages.settings import render
 
