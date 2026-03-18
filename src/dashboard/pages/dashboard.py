@@ -3,98 +3,192 @@ import sys
 import os
 from datetime import datetime
 
-# Path setup
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, _ROOT)
 
-from src.db import get_balance, list_recommendations, init_db
+from src.db import get_balance, list_recommendations, get_recommendation_summary, init_db
+import plotly.graph_objects as go
 
-# Initialize
 init_db()
 st.set_page_config(page_title="OddsBot", layout="wide")
 
-# Simple dark theme CSS
+# Dark theme
 st.markdown("""
 <style>
-    .stApp { background: #0a0a0a; }
-    h1 { color: #00d4ff; }
+    .stApp { background: #0d0d12; color: #e0e0e0; }
+    h1 { color: #00d4ff; font-size: 2.5rem !important; }
     .stButton>button { 
-        background: #00d4ff; 
-        color: black; 
+        background: linear-gradient(90deg, #00d4ff, #0099cc);
+        color: white;
+        border: none;
         border-radius: 8px;
         font-weight: bold;
+        padding: 0.75rem 2rem;
+    }
+    .metric-card {
+        background: #1a1a24;
+        border-radius: 12px;
+        padding: 1.5rem;
+        border: 1px solid #2a2a3a;
+    }
+    .bet-card {
+        background: #1a1a24;
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 0.5rem 0;
+        border-left: 3px solid #00d4ff;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# Title
 st.title("🎯 OddsBot Dashboard")
 
-# Bankroll
-col1, col2, col3 = st.columns(3)
+# Get data
+summary = get_recommendation_summary()
 bankroll = get_balance()
 profit = bankroll - 1000
-
-with col1:
-    st.metric("Bankroll", f"{bankroll:.0f} NOK", f"{profit:+.0f}")
-
-# Get all bets
 bets = list_recommendations()
 open_bets = [b for b in bets if b.get('status') == 'open']
 settled = [b for b in bets if b.get('status') in ('won', 'lost')]
 
+# Top metrics
+col1, col2, col3, col4 = st.columns(4)
+with col1:
+    st.markdown(f"""
+    <div class="metric-card">
+        <div style="color: #888; font-size: 0.9rem;">Bankroll</div>
+        <div style="font-size: 2rem; font-weight: bold; color: {'#22c55e' if profit >= 0 else '#ef4444'};">
+            {bankroll:.0f} NOK
+        </div>
+        <div style="color: {'#22c55e' if profit >= 0 else '#ef4444'}; font-size: 0.9rem;">
+            {profit:+.0f} NOK
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
 with col2:
-    st.metric("Open Bets", len(open_bets))
+    win_rate = summary['win_rate']
+    st.markdown(f"""
+    <div class="metric-card">
+        <div style="color: #888; font-size: 0.9rem;">Win Rate</div>
+        <div style="font-size: 2rem; font-weight: bold; color: {'#22c55e' if win_rate >= 50 else '#ef4444'};">
+            {win_rate:.1f}%
+        </div>
+        <div style="color: #888; font-size: 0.9rem;">
+            {summary['win_count']}W / {summary['loss_count']}L
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
 with col3:
-    wins = len([b for b in settled if b.get('status') == 'won'])
-    total = len(settled)
-    wr = (wins / total * 100) if total > 0 else 0
-    st.metric("Win Rate", f"{wr:.0f}%", f"{wins}/{total}")
+    st.markdown(f"""
+    <div class="metric-card">
+        <div style="color: #888; font-size: 0.9rem;">Open Bets</div>
+        <div style="font-size: 2rem; font-weight: bold; color: #00d4ff;">
+            {len(open_bets)}
+        </div>
+        <div style="color: #888; font-size: 0.9rem;">
+            {len(bets)} total
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
-# Open Bets
-st.subheader("⚡ Open Bets")
-if open_bets:
-    for bet in open_bets[:10]:
-        with st.container():
-            c1, c2, c3 = st.columns([3, 2, 1])
-            with c1:
-                st.write(f"**{bet.get('match', 'Unknown')}**")
-                st.caption(f"{bet.get('league', 'Unknown')} | {bet.get('selection', 'Unknown')}")
-            with c2:
-                st.write(f"Odds: {bet.get('odds', 0):.2f}x")
-                st.caption(f"Edge: {bet.get('edge_pct', 0):.1f}%")
-            with c3:
-                st.write(f"{bet.get('recommended_stake', 0):.0f} NOK")
-            st.divider()
-else:
-    st.info("No open bets. Run the bot to place bets.")
+with col4:
+    roi = summary['roi_pct']
+    st.markdown(f"""
+    <div class="metric-card">
+        <div style="color: #888; font-size: 0.9rem;">ROI</div>
+        <div style="font-size: 2rem; font-weight: bold; color: {'#22c55e' if roi >= 0 else '#ef4444'};">
+            {roi:+.1f}%
+        </div>
+        <div style="color: #888; font-size: 0.9rem;">
+            All time
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
-# Actions
+# Performance Chart
+if settled:
+    st.subheader("📈 Performance")
+    
+    # Calculate cumulative PnL
+    cumulative = []
+    running_total = 0
+    for bet in reversed(settled):
+        running_total += bet.get('pnl', 0)
+        cumulative.append(running_total)
+    
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        y=cumulative,
+        mode='lines+markers',
+        line=dict(color='#00d4ff', width=3),
+        marker=dict(size=6, color='#00d4ff'),
+        fill='tozeroy',
+        fillcolor='rgba(0, 212, 255, 0.1)'
+    ))
+    
+    fig.update_layout(
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='#e0e0e0'),
+        xaxis=dict(showgrid=False, showticklabels=False),
+        yaxis=dict(gridcolor='#2a2a3a', zerolinecolor='#444'),
+        margin=dict(l=0, r=0, t=0, b=0),
+        height=250
+    )
+    
+    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+
+# Run Bot Button
 st.subheader("🎮 Actions")
+if st.button("🤖 Run Bot (Settle & Place New Bets)", use_container_width=True):
+    import subprocess
+    with st.spinner("Running bot..."):
+        result = subprocess.run(
+            ['python3', 'odds_bot/main.py'],
+            capture_output=True,
+            text=True,
+            cwd=_ROOT
+        )
+        st.code(result.stdout)
+        st.rerun()
+
+# Two columns for bets
 col1, col2 = st.columns(2)
 
 with col1:
-    if st.button("🤖 Run Bot", use_container_width=True):
-        import subprocess
-        with st.spinner("Running..."):
-            result = subprocess.run(
-                ['python3', 'odds_bot/main.py'],
-                capture_output=True,
-                text=True,
-                cwd=_ROOT
-            )
-            st.code(result.stdout)
-            st.rerun()
+    st.subheader(f"⚡ Open Bets ({len(open_bets)})")
+    if open_bets:
+        for bet in open_bets[:10]:
+            st.markdown(f"""
+            <div class="bet-card">
+                <div style="display: flex; justify-content: space-between;">
+                    <span style="font-weight: bold;">{bet.get('match', 'Unknown')}</span>
+                    <span style="color: #00d4ff; font-weight: bold;">{bet.get('odds', 0):.2f}x</span>
+                </div>
+                <div style="color: #888; font-size: 0.85rem; margin-top: 0.25rem;">
+                    {bet.get('league', 'Unknown')} • {bet.get('selection', 'Unknown')} • {bet.get('edge_pct', 0):.1f}% edge
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.info("No open bets. Run the bot to place bets.")
 
 with col2:
-    if st.button("🔄 Refresh", use_container_width=True):
-        st.rerun()
-
-# Settled bets
-if settled:
-    st.subheader("📊 Recent Results")
-    for bet in settled[:5]:
-        emoji = "✅" if bet.get('status') == 'won' else "❌"
-        pnl = bet.get('pnl', 0)
-        st.write(f"{emoji} {bet.get('match', 'Unknown')} | {pnl:+.0f} NOK")
+    st.subheader(f"📊 Recent Results ({len(settled)})")
+    if settled:
+        for bet in settled[:10]:
+            pnl = bet.get('pnl', 0)
+            emoji = "✅" if pnl > 0 else "❌"
+            color = "#22c55e" if pnl > 0 else "#ef4444"
+            st.markdown(f"""
+            <div class="bet-card" style="border-left-color: {color};">
+                <div style="display: flex; justify-content: space-between;">
+                    <span>{emoji} {bet.get('match', 'Unknown')}</span>
+                    <span style="color: {color}; font-weight: bold;">{pnl:+.0f} NOK</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.info("No settled bets yet.")
